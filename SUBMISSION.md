@@ -23,6 +23,6 @@ One `solution.json` per problem (as built by `build_solution`):
 ## Checklist
 
 - [ ] NVIDIA account created, leaderboard submission page located (upload UI not yet verified — confirm file format there: single `solution.json` vs archive).
-- [ ] `solution.json` validates (required fields, DPS signature matches `definition.json`).
-- [ ] Local trace PASSED on all workloads (`run_eval` / `sol-execbench --json`).
-- [ ] Expected SOL-Score recorded from the local trace (latency + hardware note: GB10, unlocked clocks).
+- [x] `solution.json` validates (required fields, DPS signature matches `definition.json`).
+- [x] Local trace PASSED on all workloads (`run_eval` / `sol-execbench --json`).
+- [x] Expected SOL-Score recorded from the local trace (latency + hardware note: GB10, unlocked clocks) — see `solutions/085_geglu_activation/NOTES.md`.

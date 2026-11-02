@@ -33,7 +33,7 @@ Reuse only the domain-free skeleton from `legal_agent/loop.py` (model picks one 
 3. Baseline: run the shipped example eval end-to-end natively and record a reference trace for the chosen L1 problem.
 4. Build kernel tools: problem reader, kernel writer, `solution.json` builder (DPS in-place convention, `name`/`definition`/`author`/`spec`/`sources`), local-eval runner (subprocess `sol-execbench`), trace reader.
 5. Wire the loop: instructions + tool definitions + per-turn save, last-turn "submit what you have", pause on eval-timeout/API failure with resume.
-6. First campaign: agent optimizes the one L1 problem until correct and faster than reference; freeze the winning `solution.json`.
+6. First campaign — DONE 2026-11-02: 30-turn run on `085_geglu_activation` (model `muse-spark-1.3-contributor`); winner v3 Triton PASSED 16/16 at 0.711ms mean (~2.3x vs the 1.61ms PyTorch-port baseline); frozen at `solutions/085_geglu_activation/` and independently re-verified 16/16 PASSED.
 7. Submission packaging: per-problem solution files plus a checklist (account, upload, expected SOL-Score, variance caveat).
 
 ## Validation Plan

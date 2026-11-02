@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 def model() -> str:
-    """The model the agent talks to (MODEL_API_MODEL, default muse-spark-1.3)."""
-    return os.environ.get("MODEL_API_MODEL") or "muse-spark-1.3"
+    """The model the agent talks to (MODEL_API_MODEL, default muse-spark-1.3-contributor)."""
+    return os.environ.get("MODEL_API_MODEL") or "muse-spark-1.3-contributor"
 
 
 def author() -> str:

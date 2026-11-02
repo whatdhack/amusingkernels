@@ -1,0 +1,26 @@
+{
+ "name": "085_geglu_activation_triton_v3",
+ "definition": "085_geglu_activation",
+ "author": "amusingkernels",
+ "spec": {
+  "languages": [
+   "triton"
+  ],
+  "target_hardware": [
+   "B200",
+   "LOCAL"
+  ],
+  "entry_point": "kernel.py::run",
+  "dependencies": [
+   "torch",
+   "triton >= 2.3"
+  ],
+  "destination_passing_style": true
+ },
+ "sources": [
+  {
+   "path": "kernel.py",
+   "content": "import torch\nimport triton\nimport triton.language as tl\n\n@triton.jit\ndef _geglu_kernel(\n    x_ptr, o_ptr,\n    BLOCK: tl.constexpr,\n):\n    pid = tl.program_id(0)\n    row = pid // 5\n    blk = pid % 5\n    offs = blk * BLOCK + tl.arange(0, BLOCK)\n    base = row * 10240\n    xg = tl.load(x_ptr + base + offs).to(tl.float32)\n    xl = tl.load(x_ptr + base + 5120 + offs).to(tl.float32)\n    x3 = xg * xg * xg\n    inner = 0.7978845608028654 * (xg + 0.044715 * x3)\n    a = tl.abs(inner)\n    e = tl.exp(-2.0 * a)\n    t = (1.0 - e) / (1.0 + e)\n    tanh_v = tl.where(inner >= 0, t, -t)\n    gelu = 0.5 * xg * (1.0 + tanh_v)\n    out = gelu * xl\n    tl.store(o_ptr + row * 5120 + offs, out)\n\ndef run(x, output, **kwargs):\n    if not (x.is_contiguous() and output.is_contiguous()):\n        import torch.nn.functional as F\n        inner = x.shape[-1] // 2\n        output.copy_(F.gelu(x[..., :inner], approximate='tanh') * x[..., inner:])\n        return\n    M = output.numel() // 5120\n    grid = (M * 5,)\n    _geglu_kernel[grid](x, output, BLOCK=1024, num_warps=8)\n"
+  }
+ ]
+}
