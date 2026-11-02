@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# The agent's own Python comes from .env (PYTHON=...); default python3.
+load_env() {
+  if [[ -f .env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+  fi
+}
+load_env
+if [[ -z "${PYTHON:-}" ]]; then PYTHON=python3; fi
+
+COMMAND="${1:-help}"
+shift || true
+
+case "$COMMAND" in
+  setup)
+    [[ -f .env ]] || cp .env.example .env
+    "$PYTHON" -m pip install --quiet --disable-pip-version-check -r requirements.txt
+    "$PYTHON" scripts_preflight.py
+    ;;
+  run)
+    "$PYTHON" -m kernel_agent "$@"
+    ;;
+  test)
+    "$PYTHON" -m unittest discover -s tests
+    ;;
+  *)
+    cat >&2 <<'USAGE'
+Usage: ./helper COMMAND
+  setup                  install requirements, check MODEL_API_KEY + PROBLEM_DIR + evaluator
+  test                   offline tests (no API calls, no GPU)
+  run [--turns N] [--resume RUN_ID]   run the agent, or continue a run
+USAGE
+    exit 2
+    ;;
+esac
