@@ -1,0 +1,26 @@
+{
+ "name": "083_attention_score_value_matmul_triton_v3",
+ "definition": "083_attention_score_value_matmul",
+ "author": "amusingkernels",
+ "spec": {
+  "languages": [
+   "triton"
+  ],
+  "target_hardware": [
+   "B200",
+   "LOCAL"
+  ],
+  "entry_point": "kernel.py::run",
+  "dependencies": [
+   "torch",
+   "triton >= 2.3"
+  ],
+  "destination_passing_style": true
+ },
+ "sources": [
+  {
+   "path": "kernel.py",
+   "content": "import torch\nimport triton\nimport triton.language as tl\n\n@triton.jit\ndef _av_kernel(\n    A_ptr, V_ptr, O_ptr,\n    s_ab, s_ah, s_aq, s_ak,\n    s_vb, s_vh, s_vk, s_vd,\n    s_ob, s_oq,\n    Q, K,\n    BQ: tl.constexpr, BK: tl.constexpr, D: tl.constexpr = 64,\n):\n    pid = tl.program_id(0)\n    nq = tl.cdiv(Q, BQ)\n    bh = pid // nq\n    qb = pid % nq\n    b = bh // 20\n    h = bh % 20\n    q0 = qb * BQ\n\n    off_q = tl.arange(0, BQ)\n    off_k = tl.arange(0, BK)\n    off_d = tl.arange(0, D)\n    q_idx = q0 + off_q\n    q_mask = q_idx < Q\n\n    A_base = A_ptr + b * s_ab + h * s_ah\n    V_base = V_ptr + b * s_vb + h * s_vh\n    O_base = O_ptr + b * s_ob + h * D\n\n    acc = tl.zeros((BQ, D), dtype=tl.float32)\n    for k0 in range(0, tl.cdiv(K, BK)):\n        k_idx = k0 * BK + off_k\n        k_mask = k_idx < K\n        a = tl.load(A_base + (q_idx[:, None] * s_aq + k_idx[None, :] * s_ak),\n                    mask=q_mask[:, None] & k_mask[None, :], other=0.0)\n        v = tl.load(V_base + (k_idx[:, None] * s_vk + off_d[None, :] * s_vd),\n                    mask=k_mask[:, None], other=0.0)\n        acc = tl.dot(a, v, acc)\n\n    o = acc.to(tl.bfloat16)\n    tl.store(O_base + (q_idx[:, None] * s_oq + off_d[None, :]), o, mask=q_mask[:, None])\n\n\ndef run(attention_weights, value, output, **kwargs):\n    B = attention_weights.shape[0]\n    Q = attention_weights.shape[2]\n    K = attention_weights.shape[3]\n    s_ab, s_ah, s_aq, s_ak = attention_weights.stride()\n    s_vb, s_vh, s_vk, s_vd = value.stride()\n    s_ob, s_oq, s_ol = output.stride()\n    # adaptive tiling\n    if Q <= 32:\n        BQ, w, st = 32, 4, 3\n    elif Q <= 256:\n        BQ, w, st = 64, 4, 3\n    else:\n        BQ, w, st = 128, 8, 4\n    if K <= 32:\n        BK = 32\n    elif K <= 128:\n        BK = 64\n    else:\n        BK = 64\n    # for small-K cross-attn with big Q, larger BQ still best; keep warps 8\n    nq = (Q + BQ - 1) // BQ\n    grid = (B * 20 * nq,)\n    _av_kernel[grid](\n        attention_weights, value, output,\n        s_ab, s_ah, s_aq, s_ak,\n        s_vb, s_vh, s_vk, s_vd,\n        s_ob, s_oq,\n        Q, K,\n        BQ=BQ, BK=BK, D=64,\n        num_warps=w, num_stages=st,\n    )\n"
+  }
+ ]
+}

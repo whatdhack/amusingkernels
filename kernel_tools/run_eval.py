@@ -110,7 +110,9 @@ def run(ctx: Context, args: dict) -> dict:
             "version": version_id,
         }
     trace_path.write_text(json.dumps(traces, indent=1) + "\n")
-    summary = _summarize(traces)
+    from kernel_agent.sol import trace_sols
+
+    summary = _summarize(traces, trace_sols(ctx.root, ctx.run_id, traces))
     summary.update(
         version=version_id,
         trace=str(trace_path.relative_to(ctx.root)),
@@ -123,7 +125,7 @@ def _timeout(args: dict) -> int:
     return int(args.get("timeout") or 600) + int(args.get("compile_timeout") or 120) + 60
 
 
-def _summarize(traces: list) -> dict[str, Any]:
+def _summarize(traces: list, sols: list | None = None) -> dict[str, Any]:
     """One eval verdict across the workload traces."""
     statuses = [_trace(t).get("status") for t in traces]
     passed = sum(1 for s in statuses if s == "PASSED")
@@ -153,12 +155,32 @@ def _summarize(traces: list) -> dict[str, Any]:
         eval_status = "PASSED"
     latency = sum(latencies) / len(latencies) if latencies else None
     reference = sum(ref_latencies) / len(ref_latencies) if ref_latencies else None
+    sol_values = [
+        s["sol_ms"]
+        for t, s in zip(traces, sols or [])
+        if s is not None and _trace(t).get("status") == "PASSED"
+    ]
+    sol = sum(sol_values) / len(sol_values) if sol_values else None
+    passed_lat = [
+        p.get("latency_ms")
+        for t in traces
+        if _trace(t).get("status") == "PASSED"
+        and isinstance((p := (_trace(t).get("performance") or {})), dict)
+        and isinstance(p.get("latency_ms"), (int, float))
+    ]
+    pct_sol = (
+        100 * sum(sol_values) / sum(passed_lat)
+        if sol_values and passed_lat and sum(passed_lat) > 0
+        else None
+    )
     return {
         "eval_status": eval_status,
         "passed": passed,
         "n_workloads": len(traces),
         "statuses": statuses,
         "latency_ms": latency,
+        "sol_ms": sol,
+        "pct_sol": pct_sol,
         "reference_latency_ms": reference,
         "speedup_factor": (reference / latency)
         if latency and reference

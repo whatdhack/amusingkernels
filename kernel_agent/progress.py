@@ -198,6 +198,11 @@ def _summary(output: Any) -> str:
         text = str(result["eval_status"])
         if result.get("latency_ms") is not None:
             text += f" {result['latency_ms']:.3f}ms"
+        if result.get("sol_ms") is not None:
+            text += f" (SOL {result['sol_ms']:.3f}ms"
+            if result.get("pct_sol") is not None:
+                text += f", {result['pct_sol']:.1f}%"
+            text += ")"
         if result.get("passed") is not None:
             text += f" ({result['passed']}/{result.get('n_workloads')} workloads)"
         return text

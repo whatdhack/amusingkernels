@@ -41,13 +41,18 @@ def run(ctx: Context, args: dict) -> dict:
         return {"error": f"{version_id} has no saved trace file"}
     traces = json.loads(trace_file.read_text())
     traces = traces if isinstance(traces, list) else [traces]
+    from kernel_agent.sol import trace_sols
+
+    sols = trace_sols(ctx.root, ctx.run_id, traces)
     workloads = []
-    for trace in traces:
+    for trace, sol in zip(traces, sols):
         evaluation = trace.get("evaluation", {}) if isinstance(trace, dict) else {}
         workloads.append(
             {
                 "axes": (trace.get("workload", {}) or {}).get("axes", {}),
                 "status": evaluation.get("status"),
+                "sol_ms": sol["sol_ms"] if sol else None,
+                "sol_bottleneck": sol["bottleneck"] if sol else None,
                 "correctness": evaluation.get("correctness"),
                 "performance": evaluation.get("performance"),
                 "log_tail": str(evaluation.get("log", ""))[-LOG_LIMIT:],

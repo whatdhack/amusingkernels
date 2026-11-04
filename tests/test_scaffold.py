@@ -12,7 +12,19 @@ from unittest import mock
 
 import kernel_tools
 from kernel_agent.loop import _objective
+from kernel_agent.progress import _summary
 from kernel_agent.record import KernelRecord
+from kernel_agent.settings import solar_dir
+from kernel_agent.sol import (
+    PEAK_BW_BYTES_S,
+    compute_peak_flops,
+    ensure_macs,
+    fused_bytes,
+    resolve_dims,
+    sol_ms,
+    tensor_numel,
+    trace_sols,
+)
 from kernel_tools import (
     build_solution,
     read_problem,
@@ -20,6 +32,7 @@ from kernel_tools import (
     run_eval,
     write_kernel,
 )
+from kernel_tools.run_eval import _summarize
 
 DEFINITION = {
     "name": "rmsnorm_h4",
@@ -232,6 +245,111 @@ class ScaffoldTest(unittest.TestCase):
              "latency_ms": 0.01, "trace": "t"},
         )
         self.assertIsNone(record.best_version())
+
+
+class SolTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.problem = self.root / "problem"
+        self.problem.mkdir()
+        (self.problem / "definition.json").write_text(json.dumps(DEFINITION))
+        (self.problem / "workload.jsonl").write_text(json.dumps(WORKLOAD) + "\n")
+        self.env = mock.patch.dict(
+            os.environ,
+            {"PROBLEM_DIR": str(self.problem), "SOLAR_DIR": "/nonexistent-solar"},
+        )
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.addCleanup(self.tmp.cleanup)
+
+    def test_resolve_dims(self) -> None:
+        definition = {
+            "axes": {
+                "a": {"type": "var"},
+                "c": {"type": "const", "value": 4},
+                "e": {"type": "expr", "expression": "a * c + 1"},
+            }
+        }
+        self.assertEqual(
+            resolve_dims(definition, {"a": 3}), {"a": 3, "c": 4, "e": 13}
+        )
+
+    def test_tensor_numel(self) -> None:
+        self.assertEqual(tensor_numel(["a", "c"], {"a": 3, "c": 4}), 12)
+        self.assertEqual(tensor_numel(None, {}), 1)
+        self.assertEqual(tensor_numel([], {}), 1)
+
+    def test_fused_bytes(self) -> None:
+        # input 2x4 f32 (32B) + weight 4 f32 (16B) + eps scalar (4B) + output (32B)
+        self.assertEqual(fused_bytes(DEFINITION, {"batch_size": 2}), 84)
+
+    def test_sol_ms_memory_bound(self) -> None:
+        result = sol_ms(DEFINITION, WORKLOAD, macs=0)
+        expected = 84 / PEAK_BW_BYTES_S * 1000
+        self.assertAlmostEqual(result["sol_ms"], expected)
+        self.assertEqual(result["bottleneck"], "memory")
+        self.assertEqual(result["compute_ms"], 0.0)
+        self.assertEqual(result["bytes"], 84)
+
+    def test_sol_ms_compute_bound(self) -> None:
+        result = sol_ms(DEFINITION, WORKLOAD, macs=1e12)
+        self.assertEqual(result["bottleneck"], "compute")
+        self.assertAlmostEqual(
+            result["sol_ms"], 1e12 * 2 / compute_peak_flops(DEFINITION) * 1000
+        )
+
+    def test_ensure_macs_falls_back_without_solar(self) -> None:
+        macs = ensure_macs(self.root, "run-test", self.problem)
+        self.assertEqual(macs, {"x": None})
+        self.assertTrue((self.root / "runs" / "run-test" / "solar_macs.json").is_file())
+
+    def test_trace_sols_matches_uuid(self) -> None:
+        traces = [{"workload": {"uuid": "x"}, "evaluation": {"status": "PASSED"}}]
+        sols = trace_sols(self.root, "run-test", traces)
+        self.assertEqual(len(sols), 1)
+        self.assertAlmostEqual(sols[0]["sol_ms"], 84 / PEAK_BW_BYTES_S * 1000)
+        unknown = trace_sols(
+            self.root, "run-test", [{"workload": {"uuid": "nope"}}]
+        )
+        self.assertEqual(unknown, [None])
+
+    def test_summarize_reports_sol(self) -> None:
+        traces = [
+            {
+                "evaluation": {
+                    "status": "PASSED",
+                    "correctness": {"max_relative_error": 0.0},
+                    "performance": {"latency_ms": 1.0},
+                }
+            }
+        ]
+        summary = _summarize(traces, [{"sol_ms": 0.5}])
+        self.assertAlmostEqual(summary["sol_ms"], 0.5)
+        self.assertAlmostEqual(summary["pct_sol"], 50.0)
+
+    def test_summary_line_shows_sol(self) -> None:
+        line = _summary(
+            json.dumps(
+                {
+                    "eval_status": "PASSED",
+                    "latency_ms": 0.7114,
+                    "sol_ms": 0.5989,
+                    "pct_sol": 84.2,
+                    "passed": 16,
+                    "n_workloads": 16,
+                }
+            )
+        )
+        self.assertIn("0.711ms", line)
+        self.assertIn("SOL 0.599ms, 84.2%", line)
+
+    def test_solar_dir(self) -> None:
+        self.assertIsNone(solar_dir(self.root))
+        checkout = self.root / "checkout"
+        (checkout / "solar" / "perf").mkdir(parents=True)
+        with mock.patch.dict(os.environ, {"SOLAR_DIR": str(checkout)}):
+            self.assertEqual(solar_dir(self.root), checkout)
 
 
 if __name__ == "__main__":

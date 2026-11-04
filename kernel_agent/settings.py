@@ -36,3 +36,20 @@ def problem_dir(root: Path) -> Path:
 def sol_execbench() -> str:
     """The evaluator binary (SOL_EXECBENCH, default sol-execbench on PATH)."""
     return os.environ.get("SOL_EXECBENCH", "").strip() or "sol-execbench"
+
+
+def solar_dir(root: Path) -> Path | None:
+    """The SOLAR checkout for MAC precompute (SOLAR_DIR, default ../SOLAR).
+
+    Returns None when there is no usable checkout; SOL falls back to
+    memory-only.
+    """
+    value = os.environ.get("SOLAR_DIR", "").strip()
+    if value:
+        path = Path(value).expanduser()
+        candidate = path if path.is_absolute() else (Path(root) / path).resolve()
+    else:
+        candidate = (Path(root) / "../SOLAR").resolve()
+    if (candidate / "solar" / "perf").is_dir():
+        return candidate
+    return None
