@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from kernel_agent.settings import problem_dir, sol_execbench
+from kernel_agent.settings import eval_backend, problem_dir, sol_execbench
 
 if TYPE_CHECKING:
     from . import Context
@@ -16,8 +17,9 @@ LOG_LIMIT = 2000
 DEFINITION = {
     "type": "function",
     "name": "run_eval",
-    "description": "Run local sol-execbench eval for a built kernel version and record the trace "
-    "(correctness + latency). Needs build_solution first. A timed-out eval pauses the run.",
+    "description": "Run the sol-execbench eval for a built kernel version and record the trace "
+    "(correctness + latency). Runs on the local GPU, or on a Modal B200 when "
+    "EVAL_BACKEND=modal. Needs build_solution first. A timed-out eval pauses the run.",
     "parameters": {
         "type": "object",
         "additionalProperties": False,
@@ -54,38 +56,93 @@ def run(ctx: Context, args: dict) -> dict:
     folder = solution.parent
     trace_path = folder / "trace.json"
     jsonl_path = folder / "trace.jsonl"
-    cmd = [
-        sol_execbench(),
-        str(problem_dir(ctx.root)),
-        "--solution",
-        str(solution),
-        "--json",
-        "-o",
-        str(jsonl_path),
-    ]
-    cmd += ["--timeout", str(int(args.get("timeout") or 600))]
-    cmd += ["--compile-timeout", str(int(args.get("compile_timeout") or 120))]
-    if args.get("benchmark_reference"):
-        config = folder / "bench_config.json"
-        config.write_text(json.dumps({"benchmark_reference": True}))
-        cmd += ["--config", str(config)]
-    try:
-        completed = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=_timeout(args), cwd=ctx.root
-        )
-    except FileNotFoundError:
-        return {"error": f"evaluator not found: {cmd[0]} (install SOL-ExecBench first)"}
-    except subprocess.TimeoutExpired:
+    backend = eval_backend()
+    if backend == "modal":
+        outcome = _remote_eval(ctx, version_id, solution, args)
+        if "error" in outcome:
+            return outcome
+        stdout, stderr = outcome["stdout"], outcome.get("stderr", "")
+        jsonl_path.write_text(stdout)
+        exit_code = 0
+    else:
+        cmd = [
+            sol_execbench(),
+            str(problem_dir(ctx.root)),
+            "--solution",
+            str(solution),
+            "--json",
+            "-o",
+            str(jsonl_path),
+        ]
+        cmd += ["--timeout", str(int(args.get("timeout") or 600))]
+        cmd += ["--compile-timeout", str(int(args.get("compile_timeout") or 120))]
+        if args.get("benchmark_reference"):
+            config = folder / "bench_config.json"
+            config.write_text(json.dumps({"benchmark_reference": True}))
+            cmd += ["--config", str(config)]
+        try:
+            completed = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=_timeout(args), cwd=ctx.root
+            )
+        except FileNotFoundError:
+            return {"error": f"evaluator not found: {cmd[0]} (install SOL-ExecBench first)"}
+        except subprocess.TimeoutExpired:
+            return {
+                "error": f"eval timed out after {_timeout(args)}s",
+                "status": "paused",
+            }
+        stdout, stderr = completed.stdout, completed.stderr
+        exit_code = completed.returncode
+    traces = _parse_traces(jsonl_path, stdout)
+    if not traces:
+        detail = (stderr.strip() or stdout.strip())[-LOG_LIMIT:]
         return {
-            "error": f"eval timed out after {_timeout(args)}s",
-            "status": "paused",
-        }
-    if completed.returncode != 0:
-        return {
-            "error": "eval failed: "
-            + (completed.stderr.strip() or completed.stdout.strip())[-LOG_LIMIT:],
+            "error": f"eval failed (exit {exit_code}): {detail}"
+            if backend == "local" and exit_code != 0
+            else f"eval produced no JSON trace: {(stdout + stderr)[-LOG_LIMIT:]}",
             "version": version_id,
         }
+    trace_path.write_text(json.dumps(traces, indent=1) + "\n")
+    from kernel_agent.sol import trace_sols
+
+    summary = _summarize(traces, trace_sols(ctx.root, ctx.run_id, traces))
+    summary.update(
+        version=version_id,
+        trace=str(trace_path.relative_to(ctx.root)),
+        backend=backend,
+    )
+    ctx.record.record_eval(version_id, summary)
+    return summary
+
+
+def _remote_eval(ctx: Context, version_id: str, solution: Path, args: dict) -> dict:
+    """Run the eval on a Modal GPU via modal_eval.py (bills that workspace)."""
+    try:
+        from modal_eval import app, eval_kernel
+    except ImportError as error:
+        return {"error": f"modal backend needs modal_eval + the modal package: {error}"}
+    prob = problem_dir(ctx.root)
+    try:
+        with app.run():
+            result = eval_kernel.remote(
+                (prob / "definition.json").read_text(),
+                (prob / "workload.jsonl").read_text(),
+                solution.read_text(),
+                int(args.get("timeout") or 600),
+                int(args.get("compile_timeout") or 120),
+            )
+    except Exception as error:
+        return {"error": f"modal eval failed: {error}"}
+    if result.get("timeout"):
+        return {"error": "modal eval timed out", "status": "paused"}
+    # The CLI exits non-zero when any workload fails; usable traces may remain.
+    return {
+        "stdout": result.get("stdout", ""),
+        "stderr": result.get("stderr", ""),
+    }
+
+
+def _parse_traces(jsonl_path: Path, stdout: str) -> list:
     traces: list = []
     if jsonl_path.is_file():
         for line in jsonl_path.read_text().splitlines():
@@ -96,29 +153,14 @@ def run(ctx: Context, args: dict) -> dict:
                 except ValueError:
                     pass
     if not traces:
-        for line in completed.stdout.splitlines():
+        for line in stdout.splitlines():
             line = line.strip()
             if line.startswith("{"):
                 try:
                     traces.append(json.loads(line))
                 except ValueError:
                     pass
-    if not traces:
-        return {
-            "error": "eval produced no JSON trace: "
-            + (completed.stdout + completed.stderr)[-LOG_LIMIT:],
-            "version": version_id,
-        }
-    trace_path.write_text(json.dumps(traces, indent=1) + "\n")
-    from kernel_agent.sol import trace_sols
-
-    summary = _summarize(traces, trace_sols(ctx.root, ctx.run_id, traces))
-    summary.update(
-        version=version_id,
-        trace=str(trace_path.relative_to(ctx.root)),
-    )
-    ctx.record.record_eval(version_id, summary)
-    return summary
+    return traces
 
 
 def _timeout(args: dict) -> int:

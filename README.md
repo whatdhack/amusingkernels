@@ -64,3 +64,10 @@ The image (CUDA 13 + torch 2.9 cu130 + evaluator from the sibling checkout) buil
 once and caches. Works best for random/scalar-input workloads — problem and
 solution are passed as text, no dataset mount. 085 reference: 16/16 PASSED,
 0.027ms mean on B200 vs 0.711ms on the GB10.
+
+Set `EVAL_BACKEND=modal` in `.env` to run the agent loop's evals on the Modal
+GPU instead of the local one (each `run_eval` bills the workspace; turn lines
+show `[modal]`). Partial traces are kept when some workloads fail: on B200,
+microsecond kernels flake ~0-2 workloads per run with CUPTI
+"kernel activity sequence not found" timing errors (evaluator-side, not the
+kernel). SOL uses B200 peaks for B200 traces, GB10 peaks for local ones.

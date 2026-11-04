@@ -205,6 +205,8 @@ def _summary(output: Any) -> str:
             text += ")"
         if result.get("passed") is not None:
             text += f" ({result['passed']}/{result.get('n_workloads')} workloads)"
+        if result.get("backend") == "modal":
+            text += " [modal]"
         return text
     if "solution" in result:
         return f"solution built ({result.get('version')})"

@@ -38,6 +38,18 @@ def sol_execbench() -> str:
     return os.environ.get("SOL_EXECBENCH", "").strip() or "sol-execbench"
 
 
+def eval_backend() -> str:
+    """Where run_eval executes (EVAL_BACKEND, default local).
+
+    "local" runs sol-execbench on this machine; "modal" runs it on a Modal
+    GPU (MODAL_GPU, default B200) via modal_eval.py, billing that workspace.
+    """
+    value = os.environ.get("EVAL_BACKEND", "").strip().lower() or "local"
+    if value not in ("local", "modal"):
+        raise RuntimeError(f"EVAL_BACKEND must be local or modal: {value!r}")
+    return value
+
+
 def solar_dir(root: Path) -> Path | None:
     """The SOLAR checkout for MAC precompute (SOLAR_DIR, default ../SOLAR).
 

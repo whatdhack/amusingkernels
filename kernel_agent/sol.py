@@ -16,24 +16,47 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-# Peak rates. DRAM bandwidth is the public DGX Spark figure (128GB LPDDR5X
-# unified, 273 GB/s). Compute peaks are ESTIMATED from the public 1000 FP4
-# TOPS (sparse) figure: dense = half sparse, halving per wider precision,
-# FP32 from ~18.4 TFLOPS CUDA-core estimate. Predicted SOL times scale
+# Peak rates per architecture. GB10: DRAM bandwidth is the public DGX Spark
+# figure (128GB LPDDR5X unified, 273 GB/s); compute peaks are ESTIMATED from
+# the public 1000 FP4 TOPS (sparse) figure (dense = half sparse, halving per
+# wider precision, FP32 from ~18.4 TFLOPS CUDA-core estimate). B200: SOLAR's
+# B200.yaml roofline assumptions (8TB/s-class HBM, 1.5 GHz nominal) — the same
+# peaks the leaderboard's SOL-Score methodology uses. Predicted SOL times scale
 # linearly with these; the memory side is the solid one.
-PEAK_BW_BYTES_S = 273e9
-PEAK_FLOPS: dict[str, float] = {
-    "float64": 9.2e12,
-    "float32": 18.4e12,
-    "tf32": 62.5e12,
-    "float16": 125e12,
-    "bfloat16": 125e12,
-    "float8_e4m3fn": 250e12,
-    "float8_e5m2": 250e12,
-    "int8": 250e12,
-    "float4_e2m1": 500e12,
-    "float4_e2m1fn_x2": 500e12,
+PEAKS: dict[str, dict[str, Any]] = {
+    "GB10": {
+        "bw": 273e9,
+        "flops": {
+            "float64": 9.2e12,
+            "float32": 18.4e12,
+            "tf32": 62.5e12,
+            "float16": 125e12,
+            "bfloat16": 125e12,
+            "float8_e4m3fn": 250e12,
+            "float8_e5m2": 250e12,
+            "int8": 250e12,
+            "float4_e2m1": 500e12,
+            "float4_e2m1fn_x2": 500e12,
+        },
+    },
+    "B200": {
+        "bw": 5111.6 * 1.5e9,
+        "flops": {
+            "float64": 60.0e12,
+            "float32": 120.753e12,
+            "tf32": 905.625e12,
+            "float16": 1811.253e12,
+            "bfloat16": 1811.253e12,
+            "float8_e4m3fn": 3622.503e12,
+            "float8_e5m2": 3622.503e12,
+            "int8": 3622.5e12,
+            "float4_e2m1": 7245e12,
+            "float4_e2m1fn_x2": 7245e12,
+        },
+    },
 }
+PEAK_BW_BYTES_S = PEAKS["GB10"]["bw"]
+PEAK_FLOPS = PEAKS["GB10"]["flops"]
 DEFAULT_FLOPS = PEAK_FLOPS["float32"]
 
 DTYPE_BYTES: dict[str, float] = {
@@ -113,21 +136,23 @@ def fused_bytes(definition: dict, workload_axes: dict) -> int:
     return int(total)
 
 
-def compute_peak_flops(definition: dict) -> float:
+def compute_peak_flops(definition: dict, arch: str = "GB10") -> float:
     """Peak rate for the problem's compute dtype (first input's dtype)."""
+    flops = PEAKS.get(arch, PEAKS["GB10"])["flops"]
     inputs = definition.get("inputs", {})
     first = next(iter(inputs.values()), {})
-    return PEAK_FLOPS.get(first.get("dtype", ""), DEFAULT_FLOPS)
+    return flops.get(first.get("dtype", ""), flops["float32"])
 
 
 def sol_ms(
-    definition: dict, workload: dict, macs: float | None
+    definition: dict, workload: dict, macs: float | None, arch: str = "GB10"
 ) -> dict[str, Any]:
     """Roofline SOL for one workload. macs=None gives a memory-only lower bound."""
+    peaks = PEAKS.get(arch, PEAKS["GB10"])
     nbytes = fused_bytes(definition, workload.get("axes", {}))
-    mem_ms = nbytes / PEAK_BW_BYTES_S * 1000
+    mem_ms = nbytes / peaks["bw"] * 1000
     compute_ms = (
-        macs * 2 / compute_peak_flops(definition) * 1000
+        macs * 2 / compute_peak_flops(definition, arch) * 1000
         if macs is not None
         else None
     )
@@ -164,7 +189,14 @@ def trace_sols(root: Path, run_id: str, traces: list) -> list:
             else None
         )
         workload = workloads.get(uuid)
-        sols.append(sol_ms(definition, workload, macs.get(uuid)) if workload else None)
+        if not workload:
+            sols.append(None)
+            continue
+        hardware = ""
+        if isinstance(trace, dict):
+            hardware = str((trace.get("evaluation") or {}).get("environment", {}).get("hardware", ""))
+        arch = "B200" if "B200" in hardware else "GB10"
+        sols.append(sol_ms(definition, workload, macs.get(uuid), arch))
     return sols
 
 

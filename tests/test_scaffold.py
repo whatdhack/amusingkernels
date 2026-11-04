@@ -344,12 +344,151 @@ class SolTest(unittest.TestCase):
         self.assertIn("0.711ms", line)
         self.assertIn("SOL 0.599ms, 84.2%", line)
 
+    def test_sol_ms_b200_beats_gb10(self) -> None:
+        gb10 = sol_ms(DEFINITION, WORKLOAD, macs=0)
+        b200 = sol_ms(DEFINITION, WORKLOAD, macs=0, arch="B200")
+        self.assertLess(b200["sol_ms"], gb10["sol_ms"])
+        self.assertAlmostEqual(
+            b200["sol_ms"] / gb10["sol_ms"], 273e9 / (5111.6 * 1.5e9)
+        )
+
+    def test_trace_sols_picks_arch_from_hardware(self) -> None:
+        traces = [
+            {
+                "workload": {"uuid": "x"},
+                "evaluation": {
+                    "status": "PASSED",
+                    "environment": {"hardware": "NVIDIA B200"},
+                },
+            },
+            {
+                "workload": {"uuid": "x"},
+                "evaluation": {
+                    "status": "PASSED",
+                    "environment": {"hardware": "NVIDIA GB10"},
+                },
+            },
+        ]
+        sols = trace_sols(self.root, "run-test", traces)
+        self.assertLess(sols[0]["sol_ms"], sols[1]["sol_ms"])
+
     def test_solar_dir(self) -> None:
         self.assertIsNone(solar_dir(self.root))
         checkout = self.root / "checkout"
         (checkout / "solar" / "perf").mkdir(parents=True)
         with mock.patch.dict(os.environ, {"SOLAR_DIR": str(checkout)}):
             self.assertEqual(solar_dir(self.root), checkout)
+
+
+class ModalBackendTest(unittest.TestCase):
+    TRACE = {
+        "definition": "rmsnorm_h4",
+        "workload": {"uuid": "x", "axes": {"batch_size": 2}, "inputs": {}},
+        "evaluation": {
+            "status": "PASSED",
+            "correctness": {"max_relative_error": 0.001},
+            "performance": {"latency_ms": 2.0},
+            "environment": {"hardware": "NVIDIA B200", "libs": {}},
+            "timestamp": "2026-01-01T00:00:00Z",
+        },
+    }
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.problem = self.root / "problem"
+        self.problem.mkdir()
+        (self.problem / "definition.json").write_text(json.dumps(DEFINITION))
+        (self.problem / "workload.jsonl").write_text(json.dumps(WORKLOAD) + "\n")
+        self.env = mock.patch.dict(
+            os.environ,
+            {
+                "PROBLEM_DIR": str(self.problem),
+                "EVAL_BACKEND": "modal",
+                "SOLAR_DIR": "/nonexistent-solar",
+            },
+        )
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        self.addCleanup(self.tmp.cleanup)
+        self.ctx = SimpleNamespace(
+            client=None,
+            root=self.root,
+            run_id="run-test",
+            record=KernelRecord(self.root, "run-test"),
+        )
+        write_kernel.run(self.ctx, {"language": "triton", "content": GOOD_KERNEL})
+        build_solution.run(self.ctx, {"version": "v1"})
+
+    def test_modal_eval_parses_remote_trace(self) -> None:
+        stdout = json.dumps(self.TRACE) + "\n"
+        with (
+            mock.patch("modal_eval.app"),
+            mock.patch(
+                "modal_eval.eval_kernel.remote",
+                return_value={"returncode": 0, "stdout": stdout, "stderr": ""},
+            ),
+        ):
+            result = run_eval.run(self.ctx, {"version": "v1"})
+        self.assertEqual(result["eval_status"], "PASSED")
+        self.assertEqual(result["backend"], "modal")
+        self.assertAlmostEqual(result["latency_ms"], 2.0)
+        self.assertIsNotNone(result["sol_ms"])
+        self.assertTrue(
+            (self.root / "runs" / "run-test" / "kernels" / "v1" / "trace.json").is_file()
+        )
+
+    def test_modal_eval_keeps_traces_despite_exit_code(self) -> None:
+        stdout = json.dumps(self.TRACE) + "\n"
+        with (
+            mock.patch("modal_eval.app"),
+            mock.patch(
+                "modal_eval.eval_kernel.remote",
+                return_value={"returncode": 1, "stdout": stdout, "stderr": ""},
+            ),
+        ):
+            result = run_eval.run(self.ctx, {"version": "v1"})
+        self.assertEqual(result["eval_status"], "PASSED")
+
+    def test_modal_eval_failure(self) -> None:
+        with (
+            mock.patch("modal_eval.app"),
+            mock.patch(
+                "modal_eval.eval_kernel.remote",
+                return_value={"returncode": 1, "stdout": "", "stderr": "boom"},
+            ),
+        ):
+            result = run_eval.run(self.ctx, {"version": "v1"})
+        self.assertIn("no JSON trace", result["error"])
+
+    def test_modal_eval_timeout_pauses(self) -> None:
+        with (
+            mock.patch("modal_eval.app"),
+            mock.patch(
+                "modal_eval.eval_kernel.remote", return_value={"timeout": True}
+            ),
+        ):
+            result = run_eval.run(self.ctx, {"version": "v1"})
+        self.assertEqual(result["status"], "paused")
+
+    def test_invalid_backend_rejected(self) -> None:
+        with mock.patch.dict(os.environ, {"EVAL_BACKEND": "bogus"}):
+            with self.assertRaises(RuntimeError):
+                run_eval.run(self.ctx, {"version": "v1"})
+
+    def test_summary_line_marks_modal(self) -> None:
+        line = _summary(
+            json.dumps(
+                {
+                    "eval_status": "PASSED",
+                    "latency_ms": 1.0,
+                    "passed": 1,
+                    "n_workloads": 1,
+                    "backend": "modal",
+                }
+            )
+        )
+        self.assertIn("[modal]", line)
 
 
 if __name__ == "__main__":

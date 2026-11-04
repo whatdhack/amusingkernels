@@ -65,6 +65,7 @@ class KernelRecord:
             "latency_ms": result.get("latency_ms"),
             "sol_ms": result.get("sol_ms"),
             "pct_sol": result.get("pct_sol"),
+            "backend": result.get("backend"),
             "reference_latency_ms": result.get("reference_latency_ms"),
             "speedup_factor": result.get("speedup_factor"),
             "max_relative_error": result.get("max_relative_error"),

@@ -140,7 +140,19 @@ def debug(problem: str, solution: str) -> None:
         (prob / "workload.jsonl").read_text(),
         Path(solution).expanduser().read_text(),
     )
-    print(json.dumps(result, indent=1)[:6000])
+    print("returncode:", result.get("returncode"))
+    print("stdout bytes:", len(result.get("stdout", "")))
+    print("stderr tail:", (result.get("stderr") or "")[-1500:])
+    statuses: dict = {}
+    for line in result.get("stdout", "").splitlines():
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                status = json.loads(line).get("evaluation", {}).get("status")
+                statuses[status] = statuses.get(status, 0) + 1
+            except ValueError:
+                pass
+    print("trace statuses:", statuses)
 
 
 @app.local_entrypoint()
@@ -154,14 +166,14 @@ def main(problem: str, solution: str, timeout: int = 600) -> None:
     result = eval_kernel.remote(definition, workload, solution_text, timeout)
     if result.get("timeout"):
         raise SystemExit(f"remote eval timed out: {result}")
-    if result["returncode"] != 0:
-        print(result["stderr"] or result["stdout"])
-        raise SystemExit(f"remote eval failed (exit {result['returncode']})")
     traces = [
         json.loads(line)
         for line in result["stdout"].splitlines()
         if line.strip().startswith("{")
     ]
+    if not traces:
+        print(result["stderr"] or result["stdout"])
+        raise SystemExit(f"remote eval failed (exit {result['returncode']})")
     statuses = [t.get("evaluation", {}).get("status") for t in traces]
     latencies = [
         t["evaluation"]["performance"]["latency_ms"]
