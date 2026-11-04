@@ -23,6 +23,10 @@ import modal
 REPO = Path(__file__).resolve().parent
 SOL_SRC = REPO.parent / "SOL-ExecBench" / "src"
 
+import os
+
+GPU = os.environ.get("MODAL_GPU", "B200")
+
 if modal.is_local() and not (SOL_SRC / "sol_execbench").is_dir():
     raise RuntimeError(
         f"SOL-ExecBench checkout not found at {SOL_SRC.parent} "
@@ -57,7 +61,7 @@ image = (
 app = modal.App("amusingkernels-eval")
 
 
-@app.function(gpu="B200", image=modal.Image.debian_slim(), timeout=300)
+@app.function(gpu=GPU, image=modal.Image.debian_slim(), timeout=300)
 def gpu_check() -> str:
     import subprocess
 
@@ -69,7 +73,7 @@ def gpu_check() -> str:
     ).stdout.strip()
 
 
-@app.function(gpu="B200", image=image, timeout=1800)
+@app.function(gpu=GPU, image=image, timeout=1800)
 def eval_kernel(
     definition: str,
     workload: str,
@@ -121,7 +125,7 @@ def eval_kernel(
 
 @app.local_entrypoint()
 def check() -> None:
-    print("B200:", gpu_check.remote())
+    print(f"{GPU}:", gpu_check.remote())
 
 
 @app.local_entrypoint()
