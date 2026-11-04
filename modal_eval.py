@@ -23,7 +23,7 @@ import modal
 REPO = Path(__file__).resolve().parent
 SOL_SRC = REPO.parent / "SOL-ExecBench" / "src"
 
-if not (SOL_SRC / "sol_execbench").is_dir():
+if modal.is_local() and not (SOL_SRC / "sol_execbench").is_dir():
     raise RuntimeError(
         f"SOL-ExecBench checkout not found at {SOL_SRC.parent} "
         "(expected as a sibling of this repo)"
