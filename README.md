@@ -2,6 +2,8 @@
 
 A kernel-optimization agent for [SOL-ExecBench](https://github.com/NVIDIA/SOL-ExecBench): it writes GPU kernels (Triton-first), debugs them against the local evaluator, and produces leaderboard-ready `solution.json` files. The agentic loop is ported from the legal-agent workshop (`loop.py` skeleton: model picks one tool per turn, progress saved each turn, pause/resume); everything domain-specific is new.
 
+![amusingkernels loop: an agent writes kernel versions for a SOL-ExecBench problem, each version is signature-checked and evaled on the GB10 for correctness then time vs roofline SOL, the fastest full pass is frozen as solution.json, and durable findings go to learnings.md for the next run](assets/demo.gif)
+
 Native Python on the host GPU — no Docker anywhere.
 
 ## Layout
