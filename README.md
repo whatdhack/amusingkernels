@@ -11,6 +11,7 @@ Native Python on the host GPU — no Docker anywhere.
 - `kernel_agent/` — the loop (`loop.py`), model client, settings, per-run progress, kernel record.
 - `kernel_tools/` — the five tools: `read_problem`, `write_kernel`, `build_solution`, `run_eval`, `read_trace`.
 - `runs/` — one folder per campaign: progress, kernels, solutions, traces (gitignored).
+- `learnings.md` — durable lessons across runs (agent writes via `record_lesson`, next runs read it in their objective).
 - `tests/` — offline tests (no API calls, no GPU).
 
 ## Quickstart

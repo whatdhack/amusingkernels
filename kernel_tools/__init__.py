@@ -26,6 +26,7 @@ from . import (
     build_solution,
     read_problem,
     read_trace,
+    record_lesson,
     run_eval,
     write_kernel,
 )
@@ -38,6 +39,7 @@ MODULES: dict[str, Any] = {
         build_solution,
         run_eval,
         read_trace,
+        record_lesson,
     )
 }
 DEFINITIONS: dict[str, dict] = {

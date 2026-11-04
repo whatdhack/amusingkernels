@@ -101,18 +101,36 @@ def _loop(
     }
 
 
+LEARNINGS_LIMIT = 3000
+
+
 def _objective(root: Path) -> str:
     prob = problem_dir(root)
     definition = json.loads((prob / "definition.json").read_text())
     n_workloads = sum(1 for _ in (prob / "workload.jsonl").open())
     inputs = ", ".join(definition["inputs"])
     outputs = ", ".join(definition["outputs"])
-    return (
+    objective = (
         f"Optimize the SOL-ExecBench problem '{definition['name']}' "
         f"({prob}, {n_workloads} workload(s)).\n"
         f"Write a kernel `run({inputs}, {outputs})` that is numerically correct "
         f"first and then as fast as possible. Start by reading the problem."
     )
+    learnings = _learnings(root)
+    if learnings:
+        objective += f"\n\nPrior learnings from earlier runs:\n{learnings}"
+    return objective
+
+
+def _learnings(root: Path) -> str:
+    """Recent learnings.md entries for the objective (empty when none)."""
+    path = Path(root) / "learnings.md"
+    if not path.is_file():
+        return ""
+    text = path.read_text()
+    if len(text) <= LEARNINGS_LIMIT:
+        return text
+    return "...(earlier learnings trimmed)\n" + text[-LEARNINGS_LIMIT:]
 
 
 def _as_dict(item):

@@ -11,8 +11,15 @@ from types import SimpleNamespace
 from unittest import mock
 
 import kernel_tools
+from kernel_agent.loop import _objective
 from kernel_agent.record import KernelRecord
-from kernel_tools import build_solution, read_problem, run_eval, write_kernel
+from kernel_tools import (
+    build_solution,
+    read_problem,
+    record_lesson,
+    run_eval,
+    write_kernel,
+)
 
 DEFINITION = {
     "name": "rmsnorm_h4",
@@ -77,7 +84,8 @@ class ScaffoldTest(unittest.TestCase):
         definitions = kernel_tools.definitions()
         self.assertEqual(
             [d["name"] for d in definitions],
-            ["read_problem", "write_kernel", "build_solution", "run_eval", "read_trace"],
+            ["read_problem", "write_kernel", "build_solution", "run_eval", "read_trace",
+             "record_lesson"],
         )
         for definition in definitions:
             for key in ("type", "name", "description", "parameters"):
@@ -184,6 +192,34 @@ class ScaffoldTest(unittest.TestCase):
              "latency_ms": 0.1, "trace": "t3"},
         )
         self.assertEqual(KernelRecord(self.root, "run-test").best_version()["id"], "v1")
+
+    def test_record_lesson(self) -> None:
+        result = record_lesson.run(self.ctx, {"lesson": "Manual tanh beats the intrinsic."})
+        self.assertTrue(result["recorded"])
+        self.assertEqual(result["total_lessons"], 1)
+        text = (self.root / "learnings.md").read_text()
+        self.assertIn("Manual tanh beats the intrinsic.", text)
+        self.assertIn("run-test", text)
+        objective = _objective(self.root)
+        self.assertIn("Prior learnings from earlier runs:", objective)
+        self.assertIn("Manual tanh beats the intrinsic.", objective)
+
+    def test_record_lesson_rejects_empty_and_long(self) -> None:
+        self.assertIn("empty", record_lesson.run(self.ctx, {"lesson": "  "})["error"])
+        self.assertIn(
+            "under 1000",
+            record_lesson.run(self.ctx, {"lesson": "x" * 1001})["error"],
+        )
+
+    def test_record_lesson_caps_per_run(self) -> None:
+        for i in range(8):
+            result = record_lesson.run(self.ctx, {"lesson": f"lesson {i}"})
+            self.assertTrue(result.get("recorded"), result)
+        self.assertIn("already recorded", record_lesson.run(
+            self.ctx, {"lesson": "one too many"})["error"])
+
+    def test_objective_without_learnings(self) -> None:
+        self.assertNotIn("Prior learnings", _objective(self.root))
 
     def test_record_ignores_failed_for_best(self) -> None:
         record = KernelRecord(self.root, "run-test")
