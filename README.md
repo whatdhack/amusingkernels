@@ -47,3 +47,18 @@ sol-execbench examples/cute_dsl/jamba_attn_proj \
 ```
 
 Local timings are directional: the leaderboard runs on B200s with locked clocks; expect ~5% run-to-run variance here (up to ~10% for many-small-kernel launches).
+
+## Modal B200 evals
+
+`modal_eval.py` runs a frozen solution on a Modal B200 (same leaderboard-class GPU).
+Needs `modal` configured (`modal setup`, `whatdhack` workspace):
+
+```bash
+modal run modal_eval.py::check   # validate GPU access (MODAL_GPU=T4 for a cheap check)
+modal run modal_eval.py::main --problem <problem_dir> --solution <solution.json>
+```
+
+The image (CUDA 13 + torch 2.9 cu130 + evaluator from the sibling checkout) builds
+once and caches. Works best for random/scalar-input workloads — problem and
+solution are passed as text, no dataset mount. 085 reference: 16/16 PASSED,
+0.027ms mean on B200 vs 0.711ms on the GB10.

@@ -37,6 +37,7 @@ image = (
     modal.Image.from_registry(
         "nvidia/cuda:13.0.0-cudnn-runtime-ubuntu24.04", add_python="3.12"
     )
+    .apt_install("gcc", "g++")
     .pip_install("torch==2.9.0", index_url="https://download.pytorch.org/whl/cu130")
     .pip_install(
         [
@@ -85,7 +86,6 @@ def eval_kernel(
     import subprocess
     import sys
 
-    sys.path.insert(0, "/opt/sol_execbench")
     prob = "/tmp/prob"
     os.makedirs(prob, exist_ok=True)
     with open(f"{prob}/definition.json", "w") as f:
@@ -107,12 +107,14 @@ def eval_kernel(
         "--compile-timeout",
         str(compile_timeout),
     ]
+    env = dict(os.environ, PYTHONPATH="/opt/sol_execbench")
     try:
         completed = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             timeout=timeout + compile_timeout + 120,
+            env=env,
         )
     except subprocess.TimeoutExpired as error:
         return {"timeout": True, "error": str(error)}
@@ -126,6 +128,19 @@ def eval_kernel(
 @app.local_entrypoint()
 def check() -> None:
     print(f"{GPU}:", gpu_check.remote())
+
+
+@app.local_entrypoint()
+def debug(problem: str, solution: str) -> None:
+    import json
+
+    prob = Path(problem).expanduser()
+    result = eval_kernel.remote(
+        (prob / "definition.json").read_text(),
+        (prob / "workload.jsonl").read_text(),
+        Path(solution).expanduser().read_text(),
+    )
+    print(json.dumps(result, indent=1)[:6000])
 
 
 @app.local_entrypoint()
