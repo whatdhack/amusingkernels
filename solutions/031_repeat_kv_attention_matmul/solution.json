@@ -1,0 +1,25 @@
+{
+ "name": "031_repeat_kv_attention_matmul_pytorch_v3",
+ "definition": "031_repeat_kv_attention_matmul",
+ "author": "amusingkernels",
+ "spec": {
+  "languages": [
+   "pytorch"
+  ],
+  "target_hardware": [
+   "B200",
+   "LOCAL"
+  ],
+  "entry_point": "kernel.py::run",
+  "dependencies": [
+   "torch"
+  ],
+  "destination_passing_style": true
+ },
+ "sources": [
+  {
+   "path": "kernel.py",
+   "content": "import torch\n\n@torch.no_grad()\ndef run(query, key, attn_weights, **kwargs):\n    # query: [B,H,S,D], key: [B,Hk,S,D], out: [B,H,S,S]; H=Hk=32, D=128, groups=1.\n    # Single cuBLAS strided-batched GEMM: out = alpha*(Q @ K^T) + 0*out,\n    # alpha=scaling applied in fp32 accumulator, bf16 written once.\n    # Exactly matches reference numerics (fp32 accumulate, scale, round to bf16).\n    B, H, S, D = query.shape\n    Bk, Hk, Sk, Dk = key.shape\n    scale = Dk ** -0.5\n    q = query.reshape(B * H, S, D)\n    if Hk != H:\n        rep = H // Hk\n        k = key.reshape(B * Hk, Sk, Dk).transpose(1, 2).repeat_interleave(rep, dim=0)\n    else:\n        k = key.reshape(B * Hk, Sk, Dk).transpose(1, 2)\n    out = attn_weights.reshape(B * H, S, S)\n    torch.baddbmm(out, q, k, alpha=scale, beta=0.0, out=out)\n"
+  }
+ ]
+}

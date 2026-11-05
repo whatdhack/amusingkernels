@@ -292,6 +292,10 @@ class SolTest(unittest.TestCase):
         self.assertEqual(result["compute_ms"], 0.0)
         self.assertEqual(result["bytes"], 84)
 
+    def test_fp32_peak_calibrated(self) -> None:
+        # DEFINITION's first input is float32; calibrated against 076 (see sol.py).
+        self.assertEqual(compute_peak_flops(DEFINITION), 24.0e12)
+
     def test_sol_ms_compute_bound(self) -> None:
         result = sol_ms(DEFINITION, WORKLOAD, macs=1e12)
         self.assertEqual(result["bottleneck"], "compute")

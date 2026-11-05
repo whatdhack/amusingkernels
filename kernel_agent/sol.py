@@ -19,7 +19,9 @@ from typing import Any
 # Peak rates per architecture. GB10: DRAM bandwidth is the public DGX Spark
 # figure (128GB LPDDR5X unified, 273 GB/s); compute peaks are ESTIMATED from
 # the public 1000 FP4 TOPS (sparse) figure (dense = half sparse, halving per
-# wider precision, FP32 from ~18.4 TFLOPS CUDA-core estimate). B200: SOLAR's
+# wider precision), except FP32/64 which are CALIBRATED: a dense compute-bound
+# Triton kernel (076 v6) sustained more than the 18.4-TFLOPS guess, implying
+# >=21.6; set to 24.0 (~90% sustained). B200: SOLAR's
 # B200.yaml roofline assumptions (8TB/s-class HBM, 1.5 GHz nominal) — the same
 # peaks the leaderboard's SOL-Score methodology uses. Predicted SOL times scale
 # linearly with these; the memory side is the solid one.
@@ -27,8 +29,8 @@ PEAKS: dict[str, dict[str, Any]] = {
     "GB10": {
         "bw": 273e9,
         "flops": {
-            "float64": 9.2e12,
-            "float32": 18.4e12,
+            "float64": 12.0e12,
+            "float32": 24.0e12,
             "tf32": 62.5e12,
             "float16": 125e12,
             "bfloat16": 125e12,

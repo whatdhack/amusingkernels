@@ -27,7 +27,7 @@ DEFINITION = {
             "version": {"type": "string", "description": "Kernel version id, e.g. v1."},
             "timeout": {
                 "type": "integer",
-                "description": "Evaluation timeout in seconds (default 600).",
+                "description": "Evaluation timeout in seconds (default 900; heavy MoE problems need it).",
             },
             "compile_timeout": {
                 "type": "integer",
@@ -74,7 +74,7 @@ def run(ctx: Context, args: dict) -> dict:
             "-o",
             str(jsonl_path),
         ]
-        cmd += ["--timeout", str(int(args.get("timeout") or 600))]
+        cmd += ["--timeout", str(int(args.get("timeout") or 900))]
         cmd += ["--compile-timeout", str(int(args.get("compile_timeout") or 120))]
         if args.get("benchmark_reference"):
             config = folder / "bench_config.json"
@@ -128,7 +128,7 @@ def _remote_eval(ctx: Context, version_id: str, solution: Path, args: dict) -> d
                 (prob / "definition.json").read_text(),
                 (prob / "workload.jsonl").read_text(),
                 solution.read_text(),
-                int(args.get("timeout") or 600),
+                int(args.get("timeout") or 900),
                 int(args.get("compile_timeout") or 120),
             )
     except Exception as error:
@@ -164,7 +164,7 @@ def _parse_traces(jsonl_path: Path, stdout: str) -> list:
 
 
 def _timeout(args: dict) -> int:
-    return int(args.get("timeout") or 600) + int(args.get("compile_timeout") or 120) + 60
+    return int(args.get("timeout") or 900) + int(args.get("compile_timeout") or 120) + 60
 
 
 def _summarize(traces: list, sols: list | None = None) -> dict[str, Any]:

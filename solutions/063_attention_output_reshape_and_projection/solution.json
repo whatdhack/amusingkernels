@@ -1,0 +1,25 @@
+{
+ "name": "063_attention_output_reshape_and_projection_pytorch_v8",
+ "definition": "063_attention_output_reshape_and_projection",
+ "author": "amusingkernels",
+ "spec": {
+  "languages": [
+   "pytorch"
+  ],
+  "target_hardware": [
+   "B200",
+   "LOCAL"
+  ],
+  "entry_point": "kernel.py::run",
+  "dependencies": [
+   "torch"
+  ],
+  "destination_passing_style": true
+ },
+ "sources": [
+  {
+   "path": "kernel.py",
+   "content": "import torch\nimport triton\nimport triton.language as tl\n\ndef run(attn_output, o_proj_weight, output):\n    bsz, num_heads, seq_len, v_head_dim = attn_output.shape\n    hidden_size = o_proj_weight.shape[0]\n    a2d = attn_output.transpose(1, 2).reshape(bsz * seq_len, num_heads * v_head_dim)\n    out2d = output.reshape(bsz * seq_len, hidden_size)\n    torch.mm(a2d, o_proj_weight.t(), out=out2d)\n"
+  }
+ ]
+}

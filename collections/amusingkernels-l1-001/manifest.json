@@ -1,0 +1,70 @@
+{
+ "collection": "amusingkernels-l1-001",
+ "author": "amusingkernels",
+ "count": 7,
+ "solutions": [
+  {
+   "definition": "008_expert_output_weighted_index_add_accumulation",
+   "category": "moe",
+   "file": "008_expert_output_weighted_index_add_accumulation.json",
+   "solution_name": "008_expert_output_weighted_index_add_accumulation_triton_v7",
+   "languages": [
+    "triton"
+   ]
+  },
+  {
+   "definition": "031_repeat_kv_attention_matmul",
+   "category": "attention",
+   "file": "031_repeat_kv_attention_matmul.json",
+   "solution_name": "031_repeat_kv_attention_matmul_pytorch_v3",
+   "languages": [
+    "pytorch"
+   ]
+  },
+  {
+   "definition": "063_attention_output_reshape_and_projection",
+   "category": "gemm",
+   "file": "063_attention_output_reshape_and_projection.json",
+   "solution_name": "063_attention_output_reshape_and_projection_pytorch_v8",
+   "languages": [
+    "pytorch"
+   ]
+  },
+  {
+   "definition": "076_batched_expert_forward",
+   "category": "moe",
+   "file": "076_batched_expert_forward.json",
+   "solution_name": "076_batched_expert_forward_triton_v6",
+   "languages": [
+    "triton"
+   ]
+  },
+  {
+   "definition": "077_whisper_decoder_output_projection",
+   "category": "gemm",
+   "file": "077_whisper_decoder_output_projection.json",
+   "solution_name": "077_whisper_decoder_output_projection_triton_v8",
+   "languages": [
+    "triton"
+   ]
+  },
+  {
+   "definition": "083_attention_score_value_matmul",
+   "category": "attention",
+   "file": "083_attention_score_value_matmul.json",
+   "solution_name": "083_attention_score_value_matmul_triton_v3",
+   "languages": [
+    "triton"
+   ]
+  },
+  {
+   "definition": "085_geglu_activation",
+   "category": "activation",
+   "file": "085_geglu_activation.json",
+   "solution_name": "085_geglu_activation_triton_v3",
+   "languages": [
+    "triton"
+   ]
+  }
+ ]
+}

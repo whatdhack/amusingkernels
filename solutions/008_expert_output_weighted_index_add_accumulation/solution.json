@@ -1,0 +1,26 @@
+{
+ "name": "008_expert_output_weighted_index_add_accumulation_triton_v7",
+ "definition": "008_expert_output_weighted_index_add_accumulation",
+ "author": "amusingkernels",
+ "spec": {
+  "languages": [
+   "triton"
+  ],
+  "target_hardware": [
+   "B200",
+   "LOCAL"
+  ],
+  "entry_point": "kernel.py::run",
+  "dependencies": [
+   "torch",
+   "triton >= 2.3"
+  ],
+  "destination_passing_style": true
+ },
+ "sources": [
+  {
+   "path": "kernel.py",
+   "content": "import torch\nimport triton\nimport triton.language as tl\n\n@triton.jit\ndef _scatter_atomic_kernel(expert_ptr, out_ptr, tok_ptr, H, BLOCK: tl.constexpr):\n    pid = tl.program_id(0)\n    e = pid // 3\n    hb = pid % 3\n    offs = hb * BLOCK + tl.arange(0, BLOCK)\n    t = tl.load(tok_ptr + e).to(tl.int32)\n    v = tl.load(expert_ptr + e * H + offs)\n    tl.atomic_add(out_ptr + t * H + offs, v)\n\n@triton.jit\ndef _fill_perm_kernel(tok_ptr, cur_ptr, perm_ptr, N, BLOCK: tl.constexpr):\n    pid = tl.program_id(0)\n    offs = pid * BLOCK + tl.arange(0, BLOCK)\n    mask = offs < N\n    t = tl.load(tok_ptr + offs, mask=mask).to(tl.int32)\n    pos = tl.atomic_add(cur_ptr + t, 1, mask=mask)\n    tl.store(perm_ptr + pos, offs, mask=mask)\n\n@triton.jit\ndef _gather_kernel(final_ptr, expert_ptr, perm_ptr, starts_ptr, counts_ptr, out_ptr,\n                   H, BLOCK: tl.constexpr):\n    pid = tl.program_id(0)\n    t = pid // 3\n    hb = pid % 3\n    offs = hb * BLOCK + tl.arange(0, BLOCK)\n    row = t * H\n    acc = tl.load(final_ptr + row + offs).to(tl.float32)\n    start = tl.load(starts_ptr + t).to(tl.int32)\n    cnt = tl.load(counts_ptr + t).to(tl.int32)\n    for k in range(16):\n        if k < cnt:\n            e_idx = tl.load(perm_ptr + start + k).to(tl.int32)\n            e_val = tl.load(expert_ptr + e_idx * H + offs).to(tl.float32)\n            acc = acc + e_val\n    k = 16\n    while k < cnt:\n        e_idx = tl.load(perm_ptr + start + k).to(tl.int32)\n        e_val = tl.load(expert_ptr + e_idx * H + offs).to(tl.float32)\n        acc = acc + e_val\n        k += 1\n    tl.store(out_ptr + row + offs, acc.to(tl.bfloat16))\n\ndef run(final_hidden_states, expert_outputs, token_indices, output):\n    B = final_hidden_states.shape[0]\n    N = expert_outputs.shape[0]\n    if N <= 32768:\n        output.copy_(final_hidden_states)\n        _scatter_atomic_kernel[(N * 3,)](expert_outputs, output, token_indices, 3072, BLOCK=1024, num_warps=4)\n    else:\n        counts = torch.bincount(token_indices, minlength=B).to(torch.int32)\n        starts = torch.cumsum(counts, dim=0, dtype=torch.int32) - counts\n        cur = starts.clone()\n        perm = torch.empty(N, dtype=torch.int32, device=token_indices.device)\n        BF = 2048\n        _fill_perm_kernel[((N + BF - 1) // BF,)](token_indices, cur, perm, N, BLOCK=BF, num_warps=4)\n        _gather_kernel[(B * 3,)](final_hidden_states, expert_outputs, perm, starts, counts,\n                                 output, 3072, BLOCK=1024, num_warps=8)\n"
+  }
+ ]
+}

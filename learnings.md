@@ -6,3 +6,6 @@ Durable lessons across runs. Injected into each run's objective.
 - On 085_geglu_activation (GB10, triton 3.7.1): a Triton kernel using the tanh intrinsic failed eval; rewriting with a manual tanh passed. Prefer manual tanh over the intrinsic here.
 - In this env, torch.compile and CUDA C++/inline-CUDA solutions failed eval (compile/toolchain issues); Triton-first is validated, CUDA paths need toolchain work before retrying.
 - GEGLU winner: 1D-grid Triton, manual tanh, 8 warps — PASSED 16/16 at 0.711ms mean, ~84% of GB10 roofline SOL. Small workloads top out at 54-70% of SOL (launch overhead); optimize for the large shapes.
+
+## 2026-11-04 (run-20261104T162224Z-27adbd)
+- On fused Q@K^T*scale (031): single torch.baddbmm with alpha=scaling, beta=0, out=preallocated hits ~65% SOL and 8.5x over fp32 reference; separate bmm+scale or fp32 upcast passes create a full extra read/write of the huge [B,H,S,S] output and are far slower. Keep bf16 Tensor-Core path, never materialize expanded K.
