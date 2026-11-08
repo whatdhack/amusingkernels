@@ -1,2 +1,9 @@
 # ./helper setup installs these into the PYTHON from .env.
 openai>=2.0,<3
+# Modal client: needed for EVAL_BACKEND=modal runs, and the offline suite
+# imports it (the Modal backend tests error without it).
+modal
+# Optional, not installed here:
+# - tcgen05-model (Tier-1 exact B200 arithmetic; Tier-1 tests skip without
+#   it): pip install "tcgen05-model @ git+https://github.com/sf-tensor/tcgen05@d96b821"
+# - pillow (assets/make_demo_gif.py rendering only)

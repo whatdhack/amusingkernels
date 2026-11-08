@@ -454,6 +454,24 @@ class ModalBackendTest(unittest.TestCase):
             result = run_eval.run(self.ctx, {"version": "v1"})
         self.assertEqual(result["eval_status"], "PASSED")
 
+    def test_modal_eval_persists_remote_stderr(self) -> None:
+        stdout = json.dumps(self.TRACE) + "\n"
+        with (
+            mock.patch("modal_eval.app"),
+            mock.patch(
+                "modal_eval.eval_kernel.remote",
+                return_value={
+                    "returncode": 0,
+                    "stdout": stdout,
+                    "stderr": "cupti: activity dropped\n",
+                },
+            ),
+        ):
+            result = run_eval.run(self.ctx, {"version": "v1"})
+        self.assertEqual(result["eval_status"], "PASSED")
+        path = self.root / "runs" / "run-test" / "kernels" / "v1" / "remote-stderr.txt"
+        self.assertEqual(path.read_text(), "cupti: activity dropped\n")
+
     def test_modal_eval_failure(self) -> None:
         with (
             mock.patch("modal_eval.app"),

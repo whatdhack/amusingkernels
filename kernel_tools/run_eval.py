@@ -64,6 +64,11 @@ def run(ctx: Context, args: dict) -> dict:
             return outcome
         stdout, stderr = outcome["stdout"], outcome.get("stderr", "")
         jsonl_path.write_text(stdout)
+        if stderr.strip():
+            try:
+                (folder / "remote-stderr.txt").write_text(stderr)
+            except OSError:
+                pass
         exit_code = 0
     else:
         cmd = [
