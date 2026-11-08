@@ -1,17 +1,33 @@
-"""Run sol-execbench evals on Modal B200s.
+"""Run sol-execbench evals on Modal GPUs (B200 by default).
+
+This module measures ground truth: it runs the real evaluator on a rented
+GPU. It does NOT use the analytical B200 model in evaluators/b200 — that
+model predicts latency without a GPU and is invoked from
+kernel_tools/run_eval for advisory predictions on Triton GEMMs. The traces
+measured here are the other half of that loop: run_eval logs them as
+predicted-vs-measured pairs (calibration.jsonl), and ./helper calibrate
+compares them.
+
+How the agent uses it: with EVAL_BACKEND=modal, run_eval calls
+eval_kernel.remote(definition, workload, solution) with the problem files as
+text — no dataset mount, so random/scalar-input workloads work best.
+
+Auth: `modal setup` (writes ~/.modal.toml). GPU: MODAL_GPU (default B200;
+use T4 for the cheap access check). The CUDA+torch image builds once, then
+is cached; each eval bills the workspace for its GPU seconds.
 
 Validating GPU access (fast, tiny image):
 
     modal run modal_eval.py::check
 
-Evaluating a frozen solution on a B200 (builds the CUDA+torch image once,
-then cached):
+Evaluating a frozen solution on a B200:
 
     modal run modal_eval.py --problem ../SOL-ExecBench/data/benchmark/L1/085_geglu_activation \
         --solution solutions/085_geglu_activation/solution.json
 
-Works best for random/scalar-input workloads (no dataset mount needed):
-problem + solution files are passed as text.
+Debugging a remote failure (return code, stderr tail, status counts):
+
+    modal run modal_eval.py::debug --problem <problem_dir> --solution <solution.json>
 """
 
 from __future__ import annotations
@@ -64,6 +80,7 @@ app = modal.App("amusingkernels-eval")
 
 @app.function(gpu=GPU, image=modal.Image.debian_slim(), timeout=300)
 def gpu_check() -> str:
+    """GPU name + driver on the remote worker (the cheap access check)."""
     import subprocess
 
     return subprocess.run(
@@ -82,6 +99,13 @@ def eval_kernel(
     timeout: int = 600,
     compile_timeout: int = 120,
 ) -> dict:
+    """Run the evaluator remotely; returns the raw outcome for run_eval.
+
+    Writes the problem + solution to /tmp on the worker, runs the CLI with
+    --json, and returns {"returncode", "stdout", "stderr"} (truncated to
+    30K/8K chars), or {"timeout": True, ...} when the worker itself gives
+    up. Parsing into traces happens caller-side.
+    """
     import os
     import subprocess
     import sys
@@ -127,11 +151,13 @@ def eval_kernel(
 
 @app.local_entrypoint()
 def check() -> None:
+    """Print the remote GPU name + driver (auth + access smoke test)."""
     print(f"{GPU}:", gpu_check.remote())
 
 
 @app.local_entrypoint()
 def debug(problem: str, solution: str) -> None:
+    """One remote eval with diagnostics: exit code, stderr tail, statuses."""
     import json
 
     prob = Path(problem).expanduser()
@@ -157,6 +183,7 @@ def debug(problem: str, solution: str) -> None:
 
 @app.local_entrypoint()
 def main(problem: str, solution: str, timeout: int = 600) -> None:
+    """One remote eval, summarized: workload counts, mean B200 latency, misses."""
     import json
 
     prob = Path(problem).expanduser()
