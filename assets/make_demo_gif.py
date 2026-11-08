@@ -1,11 +1,16 @@
 """Render assets/demo.gif: an animated overview of the amusingkernels loop.
 
-Real numbers from the 085_geglu_activation campaign (run-20261102T173923Z-a1e9bd):
-versions are written, signature-checked, and evaled on the GB10; every eval
-reports time vs GB10 roofline SOL. The fastest full pass wins and is frozen as
-solution.json; durable findings go to learnings.md for the next run.
+085 frames use real numbers from the 085_geglu_activation campaign
+(run-20261102T173923Z-a1e9bd): versions are written, signature-checked, and
+evaled; every eval reports time vs roofline SOL. The fastest full pass wins
+and is frozen as solution.json; durable findings go to learnings.md.
 
-    python assets/make_demo_gif.py
+Critic, stagnation, and prediction frames use real artifacts from the
+005_gemm_n256_k7168 dual-model campaign (run-20261108T000801Z-a74036): the
+Gemini diagnosis gist, the retrieved KernelWiki technique id, and the
+predicted-vs-measured B200 latency pair.
+
+    python assets/make_demo_gif.py   # needs pillow
 """
 
 import os
@@ -21,6 +26,7 @@ ACCENT = (37, 99, 235)
 OK = (22, 142, 86)
 BAD = (200, 60, 50)
 GOLD = (196, 142, 20)
+PURPLE = (124, 58, 237)
 CARD = (255, 255, 255)
 
 FONT_DIR = "/usr/share/fonts/truetype/dejavu"
@@ -103,6 +109,14 @@ def arrow(d, start, end, color, width=2):
                (x1 - 11 * ux - 5 * uy, y1 - 11 * uy + 5 * ux)], fill=color)
 
 
+def card(d, box, title, lines, color, title_fill=None):
+    d.rounded_rectangle(box, radius=10, fill=CARD, outline=color, width=2)
+    cx = (box[0] + box[2]) // 2
+    d.text((cx, box[1] + 22), title, font=F_H, fill=title_fill or color, anchor="mm")
+    for i, line in enumerate(lines):
+        d.text((cx, box[1] + 52 + 20 * i), line, font=F_S, fill=INK, anchor="mm")
+
+
 def learnings_frame():
     img, d = base("across runs", "Durable findings become learnings.md, read by the next run",
                   stages=False)
@@ -139,6 +153,58 @@ def learnings_frame():
     return img
 
 
+def critic_frame():
+    img, d = base("005_gemm_n256_k7168", "A failed eval gets a Gemini second opinion",
+                  stages=False)
+    card(d, [40, 170, 250, 300], "v1 ✗ 16/17",
+         ["0.012ms on B200", "1 profiler flake"], BAD)
+    arrow(d, (252, 235), (298, 235), MUTED, 3)
+    card(d, [300, 150, 620, 320], "Gemini second opinion",
+         ["RUNTIME_ERROR is a profiler flake,", "not a kernel bug", "",
+          "diagnosis appended for", "the driver's next turn"], PURPLE)
+    arrow(d, (622, 235), (668, 235), PURPLE, 3)
+    card(d, [670, 170, 920, 300], "driver's fix",
+         ["v2: Triton GEMM", "BM32 · BN128 · BK64"], ACCENT)
+    d.text((480, 360), "the critic never calls tools and never stops the run",
+           font=F_S, fill=MUTED, anchor="mm")
+    return img
+
+
+def stagnation_frame():
+    img, d = base("005_gemm_n256_k7168", "Stalled with no new best: technique + fresh proposal",
+                  stages=False)
+    card(d, [40, 180, 240, 290], "stalled ×3",
+         ["no new best", "for 3 evals"], GOLD)
+    arrow(d, (242, 235), (288, 235), MUTED, 3)
+    card(d, [290, 150, 590, 320], "[KERNELWIKI …stages]",
+         ["technique-pipeline-stages", "compute-bound → num_stages ↑", "",
+          "rotates past tried pages"], ACCENT)
+    arrow(d, (592, 235), (638, 235), MUTED, 3)
+    card(d, [640, 150, 920, 320], "fresh proposal",
+         ["Gemini: one different", "approach, not a tweak", "",
+          "guidance appended"], PURPLE)
+    d.text((480, 360), "wiki checkout missing → block skipped silently",
+           font=F_S, fill=MUTED, anchor="mm")
+    return img
+
+
+def prediction_frame():
+    img, d = base("005_gemm_n256_k7168", "Triton GEMMs get a B200 prediction; pairs calibrate it",
+                  stages=False)
+    card(d, [40, 170, 240, 300], "v1 triton",
+         ["tiles 128×256×64", "from launch site"], ACCENT)
+    arrow(d, (242, 235), (288, 235), MUTED, 3)
+    card(d, [290, 150, 570, 320], "B200 evaluator",
+         ["Petri net → 123µs", "SMEM-constrained", "advisory only"], GOLD)
+    arrow(d, (572, 235), (618, 235), MUTED, 3)
+    card(d, [620, 150, 920, 320], "Modal B200",
+         ["51µs · 17/17 PASSED", "pair → calibration.jsonl", "",
+          "helper calibrate"], OK)
+    d.text((480, 360), "prediction never blocks or fails an eval",
+           font=F_S, fill=MUTED, anchor="mm")
+    return img
+
+
 def frames():
     out = []
     run = "085_geglu_activation"
@@ -171,6 +237,8 @@ def frames():
                    BAD if state == "bad" else OK)
     out.append((img, 2200))
 
+    out.append((critic_frame(), 2200))
+
     img, d = base(run, "Fastest full pass wins — v3, frozen as solution.json")
     problem_card(d)
     for i, y in enumerate(LANES):
@@ -191,19 +259,24 @@ def frames():
     d.text((830, 356), "solution.json", font=F_S, fill=GOLD, anchor="mm")
     out.append((img, 2000))
 
+    out.append((stagnation_frame(), 2200))
+    out.append((prediction_frame(), 2200))
+
     out.append((learnings_frame(), 2600))
 
     img, d = base("", "Correctness first, time vs SOL always, learning across runs",
                   stages=False)
-    lines = [("Problems", "SOL-ExecBench L1 (085 GEGLU · 083 matmul)"),
+    lines = [("Problems", "SOL-ExecBench L1 + FlashInfer-Bench GEMMs"),
              ("Loop", "one tool per turn, saved, pause/resume"),
+             ("Models", "Muse drives · Gemini reviews + proposes"),
              ("Tools", "read → write → build → eval → trace → lesson"),
-             ("Score", "time vs GB10 roofline SOL on every eval"),
-             ("Learning", "learnings.md across runs"),
-             ("Output", "frozen solution.json + B200 check via Modal")]
+             ("Stall", "KernelWiki technique after 3 evals idle"),
+             ("Predict", "B200 latency + calibration pairs"),
+             ("Score", "time vs roofline SOL on every eval"),
+             ("Output", "frozen solution.json, Modal B200 traces")]
     for i, (k, v) in enumerate(lines):
-        d.text((90, 142 + 46 * i), k, font=F_H, fill=ACCENT)
-        d.text((260, 143 + 46 * i), v, font=F_B, fill=INK)
+        d.text((90, 130 + 38 * i), k, font=F_H, fill=ACCENT)
+        d.text((260, 131 + 38 * i), v, font=F_B, fill=INK)
     out.append((img, 3000))
     return out
 
