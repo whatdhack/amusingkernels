@@ -28,12 +28,16 @@ case "$COMMAND" in
   test)
     "$PYTHON" -m unittest discover -s tests
     ;;
+  calibrate)
+    "$PYTHON" -m evaluators.b200.calibration "$@"
+    ;;
   *)
     cat >&2 <<'USAGE'
 Usage: ./helper COMMAND
   setup                  install requirements, check MODEL_API_KEY + PROBLEM_DIR + evaluator
   test                   offline tests (no API calls, no GPU)
   run [--turns N] [--resume RUN_ID]   run the agent, or continue a run
+  calibrate [--run ID] [--all] [--json]   predicted-vs-measured B200 report
 USAGE
     exit 2
     ;;

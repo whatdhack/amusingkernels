@@ -30,14 +30,20 @@ class KernelRecord:
         language: str,
         entry_point: str,
         description: str = "",
+        author: str | None = None,
     ) -> dict:
-        """Record a newly written kernel. Returns the version entry (id v1, v2, ...)."""
+        """Record a newly written kernel. Returns the version entry (id v1, v2, ...).
+
+        `author` is the model that wrote it (None for versions from before
+        authorship was tracked).
+        """
         version = {
             "id": f"v{len(self._data['versions']) + 1}",
             "source_path": source_path,
             "language": language,
             "entry_point": entry_point,
             "description": description,
+            "author": author,
             "solution_path": None,
             "evals": [],
         }
@@ -65,10 +71,14 @@ class KernelRecord:
             "latency_ms": result.get("latency_ms"),
             "sol_ms": result.get("sol_ms"),
             "pct_sol": result.get("pct_sol"),
+            "bottleneck": result.get("bottleneck"),
             "backend": result.get("backend"),
             "reference_latency_ms": result.get("reference_latency_ms"),
             "speedup_factor": result.get("speedup_factor"),
             "max_relative_error": result.get("max_relative_error"),
+            "predicted_latency_us": result.get("predicted_latency_us"),
+            "predicted_bottleneck": result.get("predicted_bottleneck"),
+            "predicted_fitness": result.get("predicted_fitness"),
             "trace": result.get("trace"),
         }
         version["evals"].append(entry)

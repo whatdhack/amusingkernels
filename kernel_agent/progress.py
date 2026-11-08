@@ -203,6 +203,8 @@ def _summary(output: Any) -> str:
             if result.get("pct_sol") is not None:
                 text += f", {result['pct_sol']:.1f}%"
             text += ")"
+        if result.get("predicted_latency_us") is not None:
+            text += f" [pred {result['predicted_latency_us'] / 1000:.3f}ms]"
         if result.get("passed") is not None:
             text += f" ({result['passed']}/{result.get('n_workloads')} workloads)"
         if result.get("backend") == "modal":

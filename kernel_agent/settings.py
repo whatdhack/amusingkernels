@@ -11,6 +11,40 @@ def model() -> str:
     return os.environ.get("MODEL_API_MODEL") or "muse-spark-1.3-contributor"
 
 
+def critic_model() -> str:
+    """The second-opinion model (GEMINI_API_MODEL, default gemini-4-argon)."""
+    return os.environ.get("GEMINI_API_MODEL") or "gemini-4-argon"
+
+
+def stagnation_threshold() -> int:
+    """Evals without a new best before the stagnation message fires.
+
+    STAGNATION_THRESHOLD (default 3); 0 disables the trigger.
+    """
+    try:
+        return int(os.environ.get("STAGNATION_THRESHOLD", "") or 3)
+    except ValueError:
+        return 3
+
+
+def kernelwiki_dir(root: Path) -> Path | None:
+    """The KernelWiki checkout for stagnation technique lookup, if usable.
+
+    KERNELWIKI_DIR (absolute, or relative to the repo root), defaulting to
+    the ../KernelWiki sibling. None when there is no checkout with
+    scripts/query.py; the wiki block is then skipped silently.
+    """
+    value = os.environ.get("KERNELWIKI_DIR", "").strip()
+    if value:
+        path = Path(value).expanduser()
+        candidate = path if path.is_absolute() else (Path(root) / path).resolve()
+    else:
+        candidate = (Path(root) / "../KernelWiki").resolve()
+    if (candidate / "scripts" / "query.py").is_file():
+        return candidate
+    return None
+
+
 def author() -> str:
     """The solution author tag (AUTHOR, default amusingkernels)."""
     return os.environ.get("AUTHOR", "").strip() or "amusingkernels"

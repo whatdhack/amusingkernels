@@ -7,12 +7,23 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from openai import OpenAI
 
 import kernel_tools
+from kernel_agent.critic import format_message, propose, review, should_review
 from kernel_agent.progress import load_progress, new_run, resume, save_progress
-from kernel_agent.settings import model, problem_dir
+from kernel_agent.record import KernelRecord
+from kernel_agent.settings import (
+    critic_model,
+    kernelwiki_dir,
+    model,
+    problem_dir,
+    stagnation_threshold,
+)
+from kernel_agent.stagnation import is_eval_result, update as stagnation_update
+from knowledge import KernelWiki, is_gemm_like, symptoms_for
 
 LAST_TURN = (
     "This is your last turn. Build a solution.json from your best correct kernel "
@@ -21,16 +32,20 @@ LAST_TURN = (
 NUDGE = "Call exactly one tool per turn. Continue with the next tool call."
 
 
-def run_agent(*, root: Path, client: OpenAI, turns: int = 30) -> dict:
+def run_agent(
+    *, root: Path, client: OpenAI, turns: int = 30, critic: OpenAI | None = None
+) -> dict:
     root = Path(root)
     instructions = Path(__file__).with_name("system_instructions.md").read_text()
     objective = _objective(root)
     run_id = new_run(root, instructions=instructions, objective=objective)
     messages: list = [{"role": "user", "content": objective}]
-    return _loop(root, run_id, client, messages, instructions, turns)
+    return _loop(root, run_id, client, messages, instructions, turns, critic)
 
 
-def resume_run(*, root: Path, run_id: str, client: OpenAI, turns: int = 15) -> dict:
+def resume_run(
+    *, root: Path, run_id: str, client: OpenAI, turns: int = 15, critic: OpenAI | None = None
+) -> dict:
     root = Path(root)
     progress = load_progress(root, run_id)
     step = resume(root, run_id)
@@ -45,13 +60,22 @@ def resume_run(*, root: Path, run_id: str, client: OpenAI, turns: int = 15) -> d
     messages: list = list(progress["messages"])
     messages.append({"role": "user", "content": step["message"]})
     instructions = (root / "runs" / run_id / "instructions.md").read_text()
-    return _loop(root, run_id, client, messages, instructions, turns)
+    return _loop(root, run_id, client, messages, instructions, turns, critic)
 
 
 def _loop(
-    root: Path, run_id: str, client: OpenAI, messages: list, instructions: str, turns: int
+    root: Path,
+    run_id: str,
+    client: OpenAI,
+    messages: list,
+    instructions: str,
+    turns: int,
+    critic: OpenAI | None = None,
 ) -> dict:
     definitions = kernel_tools.definitions()
+    notes = load_progress(root, run_id).get("notes", {}) or {}
+    stag_state: dict = notes.get("stagnation") or {"best": None, "stagnant": 0}
+    tried: set = set(notes.get("wiki_tried", []) or [])
     for i in range(turns):
         if i == turns - 1:
             messages.append({"role": "user", "content": LAST_TURN})
@@ -85,8 +109,28 @@ def _loop(
                 "output": json.dumps(result),
             }
         )
+        _maybe_review(root, run_id, critic, call, result, messages)
+        tool_name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
+        if is_eval_result(tool_name, result):
+            record = KernelRecord(root, run_id)
+            best = record.best_version()
+            stag_state, fired = stagnation_update(
+                stag_state,
+                best["id"] if best else None,
+                stagnation_threshold(),
+            )
+            if fired:
+                tried = _maybe_stagnate(root, record, critic, messages, tried)
         status = result.get("status", "running") if isinstance(result, dict) else "running"
-        save_progress(root, run_id, messages, response, status=status)
+        save_progress(
+            root,
+            run_id,
+            messages,
+            response,
+            status=status,
+            stagnation=stag_state,
+            wiki_tried=sorted(tried),
+        )
         if status != "running":
             return {
                 "run_id": run_id,
@@ -99,6 +143,124 @@ def _loop(
         "status": "paused",
         "turn": load_progress(root, run_id)["turn"],
     }
+
+
+def _maybe_review(
+    root: Path,
+    run_id: str,
+    critic: OpenAI | None,
+    call: Any,
+    result: Any,
+    messages: list,
+) -> None:
+    """Append a one-shot critic diagnosis after a failed run_eval.
+
+    Never raises and never stops the run: the worst case is no review.
+    """
+    if critic is None:
+        return
+    name = call.get("name") if isinstance(call, dict) else getattr(call, "name", None)
+    if not should_review(name or "", result):
+        return
+    try:
+        diagnosis = review(
+            client=critic,
+            model=critic_model(),
+            root=root,
+            run_id=run_id,
+            version_id=result.get("version", ""),
+            summary=result,
+            record=KernelRecord(root, run_id),
+        )
+    except Exception:
+        return
+    if diagnosis:
+        messages.append(
+            {
+                "role": "user",
+                "content": format_message(
+                    critic_model(), result.get("version", ""), diagnosis
+                ),
+            }
+        )
+        print(
+            f"Critic {critic_model()} on {result.get('version')}: "
+            "second opinion appended",
+            flush=True,
+        )
+
+
+def _maybe_stagnate(
+    root: Path,
+    record: KernelRecord,
+    critic: OpenAI | None,
+    messages: list,
+    tried: set,
+) -> set:
+    """Append the stagnation message: a wiki technique plus a fresh proposal.
+
+    Returns the updated tried set. Never raises and never stops the run;
+    appends nothing when there is neither a technique nor a proposal.
+    """
+    try:
+        return _stagnate(root, record, critic, messages, set(tried))
+    except Exception:
+        return set(tried)
+
+
+def _stagnate(
+    root: Path,
+    record: KernelRecord,
+    critic: OpenAI | None,
+    messages: list,
+    tried: set,
+) -> set:
+    name, description = _problem_text(root)
+    best = record.best_version()
+    best_eval = best["evals"][-1] if best and best.get("evals") else None
+    symptoms = symptoms_for(
+        best_eval=best_eval, gemm_like=is_gemm_like(name, description)
+    )
+    wiki_block = None
+    wiki_root = kernelwiki_dir(root)
+    if wiki_root is not None:
+        found = KernelWiki(str(wiki_root)).prompt_block(symptoms, tried)
+        if found is not None:
+            technique_id, wiki_block = found
+            tried.add(technique_id)
+    proposal = None
+    if critic is not None:
+        proposal = propose(
+            client=critic,
+            model=critic_model(),
+            root=root,
+            record=record,
+            wiki_block=wiki_block,
+        )
+    if wiki_block is None and proposal is None:
+        return tried
+    window = stagnation_threshold()
+    parts = [f"Stalled: no new best for {window} evals.", ""]
+    if wiki_block:
+        parts += [wiki_block, ""]
+    if proposal:
+        parts += [f"Fresh proposal from {critic_model()}:", "", proposal, ""]
+    parts.append("Try the technique and/or the proposal in your next version.")
+    messages.append({"role": "user", "content": "\n".join(parts)})
+    print(
+        f"Stagnation: no new best for {window} evals; guidance appended",
+        flush=True,
+    )
+    return tried
+
+
+def _problem_text(root: Path) -> tuple[str, str]:
+    try:
+        prob = problem_dir(Path(root))
+        definition = json.loads((prob / "definition.json").read_text())
+        return str(definition.get("name", "")), str(definition.get("description", ""))
+    except Exception:
+        return "", ""
 
 
 LEARNINGS_LIMIT = 3000

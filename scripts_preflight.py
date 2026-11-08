@@ -43,7 +43,13 @@ def main() -> None:
         for failure in failures:
             print(f"  - {failure}", file=sys.stderr)
         sys.exit(1)
-    print("preflight ok: key, problem, evaluator, openai")
+    if os.environ.get("GEMINI_API_KEY"):
+        critic_note = "critic " + (
+            os.environ.get("GEMINI_API_MODEL") or "gemini-4-argon"
+        )
+    else:
+        critic_note = "critic disabled"
+    print(f"preflight ok: key, problem, evaluator, openai, {critic_note}")
 
 
 if __name__ == "__main__":

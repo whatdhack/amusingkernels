@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from evaluators.b200.sol_adapter import log_pair, predict_version
 from kernel_agent.settings import eval_backend, problem_dir, sol_execbench
 
 if TYPE_CHECKING:
@@ -111,8 +112,61 @@ def run(ctx: Context, args: dict) -> dict:
         trace=str(trace_path.relative_to(ctx.root)),
         backend=backend,
     )
+    _attach_prediction(ctx, version, summary, traces)
     ctx.record.record_eval(version_id, summary)
     return summary
+
+
+def _attach_prediction(
+    ctx: Context, version: dict, summary: dict, traces: list
+) -> None:
+    """Advisory B200 prediction on the summary, plus a calibration pair.
+
+    Never breaks the eval: prediction failures leave explicit Nones, and
+    only eligible versions (Triton on a GEMM-like problem) log pairs.
+    """
+    try:
+        prediction = predict_version(root=ctx.root, version=version)
+    except Exception:
+        return
+    summary["predicted_latency_us"] = prediction["predicted_latency_us"]
+    summary["predicted_bottleneck"] = prediction["predicted_bottleneck"]
+    summary["predicted_fitness"] = prediction["predicted_fitness"]
+    summary["prediction_note"] = prediction["note"]
+    if not prediction["eligible"]:
+        return
+    hardware = None
+    if traces and isinstance(traces[0], dict):
+        environment = (traces[0].get("evaluation") or {}).get("environment") or {}
+        hardware = environment.get("hardware")
+    statuses: dict[str, int] = {}
+    for status in summary.get("statuses", []) or []:
+        statuses[str(status)] = statuses.get(str(status), 0) + 1
+    log_pair(
+        ctx.root,
+        ctx.run_id,
+        {
+            "version": version["id"],
+            "backend": summary.get("backend"),
+            "hardware": hardware,
+            "note": prediction["note"],
+            "spec": prediction["spec"],
+            "predicted": {
+                "latency_us": prediction["predicted_latency_us"],
+                "bottleneck": prediction["predicted_bottleneck"],
+                "fitness": prediction["predicted_fitness"],
+            },
+            "measured": {
+                "eval_status": summary.get("eval_status"),
+                "passed": summary.get("passed"),
+                "n_workloads": summary.get("n_workloads"),
+                "latency_ms": summary.get("latency_ms"),
+                "bottleneck": summary.get("bottleneck"),
+                "max_relative_error": summary.get("max_relative_error"),
+                "statuses": statuses,
+            },
+        },
+    )
 
 
 def _remote_eval(ctx: Context, version_id: str, solution: Path, args: dict) -> dict:
@@ -215,6 +269,16 @@ def _summarize(traces: list, sols: list | None = None) -> dict[str, Any]:
         if sol_values and passed_lat and sum(passed_lat) > 0
         else None
     )
+    bottlenecks = [
+        s.get("bottleneck")
+        for t, s in zip(traces, sols or [])
+        if isinstance(s, dict)
+        and s.get("bottleneck") in ("memory", "compute")
+        and _trace(t).get("status") == "PASSED"
+    ]
+    bottleneck = (
+        max(set(bottlenecks), key=bottlenecks.count) if bottlenecks else None
+    )
     return {
         "eval_status": eval_status,
         "passed": passed,
@@ -223,6 +287,7 @@ def _summarize(traces: list, sols: list | None = None) -> dict[str, Any]:
         "latency_ms": latency,
         "sol_ms": sol,
         "pct_sol": pct_sol,
+        "bottleneck": bottleneck,
         "reference_latency_ms": reference,
         "speedup_factor": (reference / latency)
         if latency and reference

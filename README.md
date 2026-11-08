@@ -29,6 +29,46 @@ cp .env.example .env   # then set MODEL_API_KEY and PROBLEM_DIR
 
 `./helper` uses `PYTHON` from `.env` (default `python3`); point it at the `rsi` interpreter. The evaluator binary is `SOL_EXECBENCH` (default `sol-execbench` on PATH).
 
+## Second opinion (dual model)
+
+Muse drives the tool loop. When `GEMINI_API_KEY` is set, a failed `run_eval`
+also triggers one stateless critic call (default `gemini-4-argon` via
+`GEMINI_API_BASE_URL`): it reads the kernel plus the trace and appends a
+diagnosis for the driver's next turn. The critic never calls tools and never
+stops the run, and each version records its authoring model in `record.json`.
+
+## Stagnation (KernelWiki + fresh eyes)
+
+After `STAGNATION_THRESHOLD` evals (default 3) without a new best version, the
+loop appends one guidance message: a KernelWiki technique page chosen by the
+run's measured symptoms (best kernel's roofline bottleneck, else the problem
+kind), plus — when the critic is configured — a fresh-eyes proposal for a
+different approach. Each firing rotates to a technique not yet tried in the
+run. The wiki checkout defaults to `../KernelWiki` (`KERNELWIKI_DIR`
+overrides); a missing checkout silently skips the wiki block.
+
+## B200 prediction (advisory)
+
+Every `run_eval` of a Triton kernel on a GEMM-like problem also runs the
+GPU-less B200 evaluator (ported from mini-kerngen): tile sizes come from the
+kernel's launch site, shapes from the definition workloads, and the timed
+Petri-net model predicts B200 latency and bottleneck. The prediction is
+advisory only — it never blocks or fails an eval — and each attempt appends a
+predicted-vs-measured pair to `runs/<run-id>/calibration.jsonl`, the dataset
+for calibrating the model against real Modal B200 traces. Turn lines show it
+as `[pred N.NNNms]`. Tier-1 exact arithmetic stays dormant (no sample input
+tiles are supplied yet).
+
+## Calibration report
+
+`./helper calibrate` compares those pairs across runs: coverage, latency
+agreement (geometric-mean and median predicted/measured ratio, fraction
+within 2x), Spearman rank correlation, roofline-bottleneck agreement, and
+hard-gate false rejects. `PASSED` pairs and `MIXED` pairs with no
+correctness failure inform the comparison (missing B200 timings only shrink
+the subset); use `--all` to lift the hardware filter, `--run` to scope to
+one run, and `--json` for machine-readable output.
+
 ## Setup (native, no Docker)
 
 ```bash
@@ -41,6 +81,18 @@ git clone https://github.com/NVIDIA/SOL-ExecBench.git ../SOL-ExecBench
 
 # 3. Data (from the SOL-ExecBench checkout):
 cd ../SOL-ExecBench && ./scripts/download_data.sh
+# 3b. FlashInfer-Bench definitions ship with "hf_id": "", which the
+# evaluator rejects (it wants null or non-empty): null them out.
+python -c "
+import json
+from pathlib import Path
+for p in Path('data/benchmark/FlashInfer-Bench').iterdir():
+    f = p / 'definition.json'
+    d = json.loads(f.read_text())
+    if d.get('hf_id') == '':
+        d['hf_id'] = None
+        f.write_text(json.dumps(d, indent=4) + chr(10))
+"
 
 # 4. Sanity:
 sol-execbench --help

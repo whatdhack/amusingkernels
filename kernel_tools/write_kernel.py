@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from kernel_agent.settings import model
+
 if TYPE_CHECKING:
     from . import Context
 
@@ -75,6 +77,7 @@ def run(ctx: Context, args: dict) -> dict:
         language=language,
         entry_point=f"{filename}::run",
         description=str(args.get("description", "")),
+        author=model(),
     )
     return {
         "version": version["id"],
