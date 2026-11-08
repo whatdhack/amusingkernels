@@ -9,3 +9,8 @@ Durable lessons across runs. Injected into each run's objective.
 
 ## 2026-11-04 (run-20261104T162224Z-27adbd)
 - On fused Q@K^T*scale (031): single torch.baddbmm with alpha=scaling, beta=0, out=preallocated hits ~65% SOL and 8.5x over fp32 reference; separate bmm+scale or fp32 upcast passes create a full extra read/write of the huge [B,H,S,S] output and are far slower. Keep bf16 Tensor-Core path, never materialize expanded K.
+
+## 2026-11-08 (operator notes from the 004/005 B200 campaigns)
+- On Modal B200, microsecond kernels flake CUPTI timing: a workload with status RUNTIME_ERROR and log "kernel activity sequence not found" is the profiler, not the kernel — re-run the eval instead of rewriting the kernel. MIXED results from flakes still carry valid timings for the passed workloads.
+- FlashInfer-Bench GEMMs are `C = A @ B.T` with B stored `[N, K]` (no transpose in global memory); read B as-is and transpose in registers. A PyTorch `out=` matmul baseline is a strong opener (0.009–0.012ms on B200 for 004/005).
+- FlashInfer-Bench definitions ship with `"hf_id": ""`, which the evaluator rejects — null it after downloading (README step 3b).

@@ -1,5 +1,7 @@
 # amusingkernels
 
+**Goal: generate GPU kernels and make them faster with every run.**
+
 A kernel-optimization agent for [SOL-ExecBench](https://github.com/NVIDIA/SOL-ExecBench): it writes GPU kernels (Triton-first), debugs them against the local or Modal B200 evaluator, and produces leaderboard-ready `solution.json` files. Muse drives the loop (model picks one tool per turn, progress saved each turn, pause/resume); Gemini reviews failures and proposes fresh approaches; a GPU-less B200 model predicts Triton GEMM latency for calibration.
 
 ![amusingkernels loop: an agent writes kernel versions for a SOL-ExecBench problem, each version is signature-checked and evaled for correctness then time vs roofline SOL, a failed eval gets a Gemini second opinion, a stall pulls a KernelWiki technique plus a fresh proposal, Triton GEMMs get an advisory B200 latency prediction whose pairs calibrate the model, the fastest full pass is frozen as solution.json, and durable findings go to learnings.md for the next run](assets/demo.gif)

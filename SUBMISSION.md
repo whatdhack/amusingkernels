@@ -14,6 +14,7 @@ One `solution.json` per problem (as built by `build_solution`):
 - `spec`: `languages`, `target_hardware` (include `"B200"`), `entry_point` (`"file::run"`), `destination_passing_style: true`, `dependencies`.
 - `run()` takes definition inputs then pre-allocated outputs, writes in-place, returns nothing.
 - Freeze the winning file per problem, e.g. `runs/<run-id>/kernels/v3/solution.json`.
+- Freeze winners under `solutions/<problem>/` (`solution.json`, `kernel.py`, `NOTES.md`), then pack a submission with `python collections/build.py [--name ...]` — validates each solution and writes `collections/<name>/` (one file per definition + `manifest.json`) plus a tarball.
 
 ## Reading the result
 

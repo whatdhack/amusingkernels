@@ -1,0 +1,25 @@
+{
+ "collection": "amusingkernels-fib-001",
+ "author": "amusingkernels",
+ "count": 2,
+ "solutions": [
+  {
+   "definition": "004_gemm_n128_k2048",
+   "category": "gemm",
+   "file": "004_gemm_n128_k2048.json",
+   "solution_name": "004_gemm_n128_k2048_triton_v2",
+   "languages": [
+    "triton"
+   ]
+  },
+  {
+   "definition": "005_gemm_n256_k7168",
+   "category": "gemm",
+   "file": "005_gemm_n256_k7168.json",
+   "solution_name": "005_gemm_n256_k7168_triton_v1",
+   "languages": [
+    "triton"
+   ]
+  }
+ ]
+}
