@@ -14,3 +14,6 @@ Durable lessons across runs. Injected into each run's objective.
 - On Modal B200, microsecond kernels flake CUPTI timing: a workload with status RUNTIME_ERROR and log "kernel activity sequence not found" is the profiler, not the kernel — re-run the eval instead of rewriting the kernel. MIXED results from flakes still carry valid timings for the passed workloads.
 - FlashInfer-Bench GEMMs are `C = A @ B.T` with B stored `[N, K]` (no transpose in global memory); read B as-is and transpose in registers. A PyTorch `out=` matmul baseline is a strong opener (0.009–0.012ms on B200 for 004/005).
 - FlashInfer-Bench definitions ship with `"hf_id": ""`, which the evaluator rejects — null it after downloading (README step 3b).
+
+## 2026-11-08 (run-20261108T013827Z-3e1efd)
+- On FlashInfer GEMM 009 (C=A@B.T, N=5120 K=2048) B200: plain torch.matmul(A,B.T,out=C) PASSED 25/25 at 0.0436ms mean; custom Triton NT kernel was ~2x slower (0.068ms) so cuBLAS wins here. 'Expected kernel activity sequence not found ... nvjet...' RUNTIME_ERRORs on random large-M workloads are CUPTI profiler flakes, not kernel bugs — re-run the same version instead of rewriting.

@@ -1,0 +1,25 @@
+{
+ "name": "009_gemm_n5120_k2048_pytorch_v1",
+ "definition": "009_gemm_n5120_k2048",
+ "author": "amusingkernels",
+ "spec": {
+  "languages": [
+   "pytorch"
+  ],
+  "target_hardware": [
+   "B200",
+   "LOCAL"
+  ],
+  "entry_point": "kernel.py::run",
+  "dependencies": [
+   "torch"
+  ],
+  "destination_passing_style": true
+ },
+ "sources": [
+  {
+   "path": "kernel.py",
+   "content": "import torch\n\ndef run(A, B, C, **kwargs):\n    # C = A @ B.T, A:[M,K] B:[N,K] C:[M,N] fp16\n    torch.matmul(A, B.T, out=C)\n"
+  }
+ ]
+}
